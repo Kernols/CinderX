@@ -1,0 +1,1408 @@
+const Battle = require('../models/battle.model');
+const BattleVote = require('../models/battleVote.model');
+const BattleCounter = require('../models/battleCounter.model');
+const Prediction = require('../../predictions/models/prediction.model');
+const User = require('../../users/models/user.model');
+const Analytics = require('../../analytics/models/analytics.model');
+const { StellarSdk } = require('../../../config/stellar');
+const ipfsService = require('./ipfs.service');
+const chainService = require('./battleChain.service');
+const escrowService = require('./battleEscrow.service');
+const timerService = require('./battleTimer.service');
+const { getIO } = require('../../../config/socket');
+const logger = require('../../../utils/logger');
+const { sanitizeText } = require('../../../utils/inputSanitizer');
+
+const VOTE_STAKE_XLM = Number(process.env.BATTLE_VOTE_STAKE_XLM || 0);
+const BATTLE_START_COUNTDOWN_SECONDS = Number(process.env.BATTLE_START_COUNTDOWN_SECONDS || 3);
+const VOTING_FINALIZE_GRACE_SECONDS = Number(process.env.BATTLE_VOTING_FINALIZE_GRACE_SECONDS || 0);
+const VOTING_FINALIZE_MAX_WAIT_SECONDS = Number(process.env.BATTLE_VOTING_FINALIZE_MAX_WAIT_SECONDS || 45);
+const VOTING_PENDING_POLL_MS = Number(process.env.BATTLE_VOTING_PENDING_POLL_MS || 500);
+
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function isValidPublicKey(value) {
+  return Boolean(value) && Boolean(StellarSdk?.StrKey?.isValidEd25519PublicKey?.(String(value)));
+}
+
+async function trackEvent(eventType, userId, metadata = {}) {
+  try {
+    await Analytics.create({
+      eventType,
+      userId: userId || null,
+      metadata,
+    });
+  } catch (error) {
+    logger.warn('Analytics create failed', { eventType, message: error?.message });
+  }
+}
+
+async function nextMatchId() {
+  const counter = await BattleCounter.findOneAndUpdate(
+    { key: 'battle_match_id' },
+    { $inc: { value: 1 } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  return counter.value;
+}
+
+function winnerPayload(battle) {
+  return {
+    matchId: battle.matchId,
+    status: battle.status,
+    winnerId: battle.winner ? String(battle.winner) : null,
+    votesPlayer1: battle.votesPlayer1,
+    votesPlayer2: battle.votesPlayer2,
+    txHash: battle.txHash || '',
+    endedAt: battle.endedAt,
+  };
+}
+
+function getOnChainMatchId(battle) {
+  const onChainMatchId = Number(battle?.chain?.onChainMatchId || 0);
+  if (!Number.isFinite(onChainMatchId) || onChainMatchId <= 0) {
+    throw new Error('Battle missing mirrored on-chain match id');
+  }
+  return onChainMatchId;
+}
+
+function toPublicUser(user) {
+  if (!user) return null;
+  return {
+    id: String(user._id || user.id || ''),
+    username: user.username || 'Player',
+    avatar: user.avatar || user.imageUrl || null,
+    xp: toNumber(user.xp, 0),
+    wins: toNumber(user.wins, 0),
+    losses: toNumber(user.losses, 0),
+  };
+}
+
+function nonNegativeAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function resolvePredictionPayout(prediction, battle, predictions) {
+  if (prediction.payoutAmount !== null && prediction.payoutAmount !== undefined) {
+    return { amount: nonNegativeAmount(prediction.payoutAmount), estimated: false };
+  }
+
+  // Historical predictions did not persist an amount. Only estimate a payout
+  // when the recorded transaction proves one was made.
+  if (!prediction.payoutTxHash) return { amount: 0, estimated: false };
+  if (['draw', 'cancelled'].includes(battle.status) || !battle.winner) {
+    return { amount: nonNegativeAmount(prediction.amount), estimated: true };
+  }
+  if (String(prediction.selectedPlayer) !== String(battle.winner)) {
+    return { amount: 0, estimated: false };
+  }
+
+  const winningPredictions = predictions.filter((item) => String(item.selectedPlayer) === String(battle.winner));
+  const totalPool = predictions.reduce((sum, item) => sum + nonNegativeAmount(item.amount), 0);
+  const winnersPool = winningPredictions.reduce((sum, item) => sum + nonNegativeAmount(item.amount), 0);
+  if (!winnersPool) return { amount: nonNegativeAmount(prediction.amount), estimated: true };
+
+  const currentIndex = winningPredictions.findIndex((item) => String(item._id) === String(prediction._id));
+  const roundedShare = Number((totalPool * (nonNegativeAmount(prediction.amount) / winnersPool)).toFixed(7));
+  if (currentIndex === winningPredictions.length - 1) {
+    const priorShares = winningPredictions
+      .slice(0, -1)
+      .reduce((sum, item) => sum + Number((totalPool * (nonNegativeAmount(item.amount) / winnersPool)).toFixed(7)), 0);
+    return { amount: Number((totalPool - priorShares).toFixed(7)), estimated: true };
+  }
+  return { amount: roundedShare, estimated: true };
+}
+
+function buildBattlePayouts(battle, predictions) {
+  const finance = battle.finance || {};
+  const payoutTxHashes = Array.isArray(finance.payoutTxHashes)
+    ? finance.payoutTxHashes.filter(Boolean)
+    : [];
+  let nextPayoutHash = 0;
+  const takePayoutHash = () => payoutTxHashes[nextPayoutHash++] || '';
+  const payouts = [];
+  const entryPaidByPlayer1 = Boolean(finance.entryTxPlayer1);
+  const entryPaidByPlayer2 = Boolean(finance.entryTxPlayer2);
+
+  if (battle.status === 'ended' && battle.winner) {
+    const amount = (entryPaidByPlayer1 ? nonNegativeAmount(battle.entryFee) : 0)
+      + (entryPaidByPlayer2 ? nonNegativeAmount(battle.entryFee) : 0);
+    if (amount > 0) {
+      payouts.push({
+        recipient: toPublicUser(battle.winner),
+        amount,
+        reason: 'Battle winner prize',
+        txHash: takePayoutHash(),
+        source: 'battle',
+      });
+    }
+  } else if (battle.status === 'draw' || battle.status === 'cancelled') {
+    if (entryPaidByPlayer1) {
+      payouts.push({
+        recipient: toPublicUser(battle.player1),
+        amount: nonNegativeAmount(battle.entryFee),
+        reason: battle.status === 'draw' ? 'Draw entry refund' : 'Cancelled battle refund',
+        txHash: takePayoutHash(),
+        source: 'battle',
+      });
+    }
+    if (entryPaidByPlayer2 && battle.player2) {
+      payouts.push({
+        recipient: toPublicUser(battle.player2),
+        amount: nonNegativeAmount(battle.entryFee),
+        reason: battle.status === 'draw' ? 'Draw entry refund' : 'Cancelled battle refund',
+        txHash: takePayoutHash(),
+        source: 'battle',
+      });
+    }
+  }
+
+  for (const prediction of predictions) {
+    const payout = resolvePredictionPayout(prediction, battle, predictions);
+    if (!payout.amount) continue;
+    payouts.push({
+      recipient: toPublicUser(prediction.predictor),
+      amount: payout.amount,
+      reason: prediction.won ? 'Winning prediction payout' : 'Prediction refund',
+      txHash: prediction.payoutTxHash || '',
+      source: 'prediction',
+      estimated: payout.estimated,
+    });
+  }
+
+  return payouts;
+}
+
+function buildBattleTransactions(battle, predictions, payouts) {
+  const chain = battle.chain || {};
+  const finance = battle.finance || {};
+  const transactions = [];
+  const seen = new Set();
+  const add = (label, hash) => {
+    if (!hash || seen.has(hash)) return;
+    seen.add(hash);
+    transactions.push({ label, hash });
+  };
+
+  add('Create battle on-chain', chain.createTxHash);
+  add('Player 1 entry payment', finance.entryTxPlayer1);
+  add('Player 2 entry payment', finance.entryTxPlayer2);
+  add('Player 2 joined on-chain', chain.joinTxHash);
+  add('Player 1 roast submission', chain.roast1TxHash);
+  add('Player 2 roast submission', chain.roast2TxHash);
+  (Array.isArray(chain.voteTxHashes) ? chain.voteTxHashes : []).forEach((hash, index) => add(`Vote contract update ${index + 1}`, hash));
+  (Array.isArray(finance.voteStakeTxHashes) ? finance.voteStakeTxHashes : []).forEach((hash, index) => add(`Vote stake payment ${index + 1}`, hash));
+  add('Battle finalization', chain.finalizeTxHash || battle.txHash);
+
+  for (const prediction of predictions) {
+    const predictor = prediction.predictor?.username || 'Player';
+    add(`${predictor}'s prediction stake`, prediction.escrowTxHash);
+    add(`${predictor}'s prediction contract call`, prediction.chainTxHash);
+  }
+  for (const payout of payouts) {
+    add(`${payout.recipient?.username || 'Player'}: ${payout.reason}`, payout.txHash);
+  }
+
+  return transactions;
+}
+
+class BattleService {
+  constructor() {
+    this.pendingVotesByMatch = new Map();
+  }
+
+  normalizeBattle(battleDoc) {
+    return battleDoc?.toJSON ? battleDoc.toJSON() : battleDoc;
+  }
+
+  incrementPendingVote(matchId) {
+    const key = Number(matchId);
+    const current = Number(this.pendingVotesByMatch.get(key) || 0);
+    this.pendingVotesByMatch.set(key, current + 1);
+  }
+
+  decrementPendingVote(matchId) {
+    const key = Number(matchId);
+    const current = Number(this.pendingVotesByMatch.get(key) || 0);
+    if (current <= 1) {
+      this.pendingVotesByMatch.delete(key);
+      return;
+    }
+    this.pendingVotesByMatch.set(key, current - 1);
+  }
+
+  getPendingVoteCount(matchId) {
+    return Number(this.pendingVotesByMatch.get(Number(matchId)) || 0);
+  }
+
+  async waitForPendingVotes(matchId, maxWaitMs) {
+    const startedAt = Date.now();
+    let sawPending = false;
+    while (Date.now() - startedAt < maxWaitMs) {
+      const pending = this.getPendingVoteCount(matchId);
+      if (pending > 0) {
+        sawPending = true;
+      }
+      if (pending <= 0) return sawPending;
+      await new Promise((resolve) => setTimeout(resolve, VOTING_PENDING_POLL_MS));
+    }
+    return sawPending;
+  }
+
+  async resolveUserWalletPublic(user, { persist = true } = {}) {
+    if (!user) return '';
+    const stored = String(user.walletPublicKey || '').trim();
+    let derived = '';
+
+    try {
+      if (user.walletEncryptedSecret) {
+        const secret = escrowService.getUserSecret(user);
+        derived = StellarSdk.Keypair.fromSecret(secret).publicKey();
+      }
+    } catch (error) {
+      logger.warn('Failed deriving wallet public key from encrypted secret', {
+        userId: String(user._id || ''),
+        message: error?.message,
+      });
+    }
+
+    const resolved = isValidPublicKey(derived) ? derived : stored;
+
+    if (persist && isValidPublicKey(derived) && stored !== derived) {
+      try {
+        user.walletPublicKey = derived;
+        await user.save();
+        logger.warn('Auto-corrected mismatched wallet public key from secret', {
+          userId: String(user._id || ''),
+          oldPublic: stored,
+          newPublic: derived,
+        });
+      } catch (error) {
+        logger.warn('Failed persisting corrected wallet public key', {
+          userId: String(user._id || ''),
+          message: error?.message,
+        });
+      }
+    }
+
+    if (!isValidPublicKey(resolved)) {
+      throw new Error('User wallet public key is invalid');
+    }
+
+    return resolved;
+  }
+
+  async serializeByMatchId(matchId) {
+    const battle = await Battle.findOne({ matchId })
+      .populate('creator', 'username avatar imageUrl clerkId xp wins losses rankPoints badges walletPublicKey')
+      .populate('player1', 'username avatar imageUrl clerkId xp wins losses rankPoints badges walletPublicKey')
+      .populate('player2', 'username avatar imageUrl clerkId xp wins losses rankPoints badges walletPublicKey')
+      .populate('winner', 'username avatar imageUrl clerkId xp wins losses rankPoints badges walletPublicKey');
+
+    if (!battle) {
+      return null;
+    }
+
+    return battle.toJSON();
+  }
+
+  async getOpenBattles(limit = 30) {
+    const battles = await Battle.find({ status: { $in: ['open', 'active', 'voting'] } })
+      .populate('creator', 'username avatar imageUrl')
+      .populate('player1', 'username avatar imageUrl')
+      .populate('player2', 'username avatar imageUrl')
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    return battles.map((battle) => battle.toJSON());
+  }
+
+  async getBattleByMatchId(matchId) {
+    const serialized = await this.serializeByMatchId(matchId);
+    if (!serialized) {
+      throw new Error('Battle not found');
+    }
+    return serialized;
+  }
+
+  async getParticipationStatus({ user, matchId }) {
+    const battle = await Battle.findOne({ matchId }).select('_id');
+    if (!battle) {
+      throw new Error('Battle not found');
+    }
+
+    const [vote, prediction] = await Promise.all([
+      BattleVote.findOne({ battleId: battle._id, voter: user._id }).select('selectedPlayer').lean(),
+      Prediction.findOne({ battleId: battle._id, predictor: user._id }).select('selectedPlayer').lean(),
+    ]);
+
+    return {
+      hasVoted: Boolean(vote),
+      votedForPlayerId: vote?.selectedPlayer ? String(vote.selectedPlayer) : undefined,
+      hasPredicted: Boolean(prediction),
+      predictedForPlayerId: prediction?.selectedPlayer ? String(prediction.selectedPlayer) : undefined,
+    };
+  }
+
+  async getBattleReport({ user, matchId }) {
+    const battle = await Battle.findOne({ matchId })
+      .populate('creator', 'username avatar imageUrl xp wins losses')
+      .populate('player1', 'username avatar imageUrl xp wins losses')
+      .populate('player2', 'username avatar imageUrl xp wins losses')
+      .populate('winner', 'username avatar imageUrl xp wins losses');
+    if (!battle) throw new Error('Battle not found');
+    if (!['ended', 'draw', 'cancelled'].includes(battle.status)) {
+      throw new Error('Battle report is available after the battle ends');
+    }
+
+    const [votes, predictions] = await Promise.all([
+      BattleVote.find({ battleId: battle._id })
+        .populate('voter', 'username avatar imageUrl xp wins losses')
+        .populate('selectedPlayer', 'username avatar imageUrl xp wins losses')
+        .sort({ createdAt: 1 }),
+      Prediction.find({ battleId: battle._id })
+        .populate('predictor', 'username avatar imageUrl xp wins losses')
+        .populate('selectedPlayer', 'username avatar imageUrl xp wins losses')
+        .sort({ createdAt: 1, _id: 1 }),
+    ]);
+
+    const userId = String(user._id);
+    const isPlayer = String(battle.player1?._id || battle.player1) === userId
+      || String(battle.player2?._id || battle.player2) === userId;
+    const isVoter = votes.some((vote) => String(vote.voter?._id || vote.voter) === userId);
+    if (!isPlayer && !isVoter) {
+      throw new Error('Not authorized to view this battle report');
+    }
+
+    const payouts = buildBattlePayouts(battle, predictions);
+    const battleJson = battle.toJSON();
+    battleJson.creator = toPublicUser(battle.creator);
+    battleJson.player1 = toPublicUser(battle.player1);
+    battleJson.player2 = toPublicUser(battle.player2);
+    battleJson.winner = toPublicUser(battle.winner);
+
+    return {
+      battle: battleJson,
+      votes: votes.map((vote) => ({
+        id: String(vote._id),
+        voter: toPublicUser(vote.voter),
+        selectedPlayer: toPublicUser(vote.selectedPlayer),
+        chainTxHash: vote.chainTxHash || '',
+        stakeTxHash: vote.stakeTxHash || '',
+        createdAt: vote.createdAt,
+      })),
+      predictions: predictions.map((prediction) => {
+        const payout = resolvePredictionPayout(prediction, battle, predictions);
+        return {
+          id: String(prediction._id),
+          predictor: toPublicUser(prediction.predictor),
+          selectedPlayer: toPublicUser(prediction.selectedPlayer),
+          amount: nonNegativeAmount(prediction.amount),
+          payoutAmount: payout.amount,
+          payoutEstimated: payout.estimated,
+          settled: Boolean(prediction.settled),
+          won: Boolean(prediction.won),
+          escrowTxHash: prediction.escrowTxHash || '',
+          chainTxHash: prediction.chainTxHash || '',
+          payoutTxHash: prediction.payoutTxHash || '',
+          createdAt: prediction.createdAt,
+        };
+      }),
+      payouts,
+      transactions: buildBattleTransactions(battle, predictions, payouts),
+      network: String(process.env.STELLAR_NETWORK || 'testnet').toLowerCase(),
+    };
+  }
+
+  async createBattle({ user, topic, entryFee, durationHours }) {
+    if (!user?.walletPublicKey || !user?.walletEncryptedSecret) {
+      throw new Error('Wallet with signing capability is required to create battle');
+    }
+
+    const safeTopic = sanitizeText(topic, 120);
+    if (!safeTopic) {
+      throw new Error('Topic is required');
+    }
+
+    const fee = toNumber(entryFee, 1);
+    if (fee <= 0) {
+      throw new Error('Entry fee must be greater than zero');
+    }
+
+    const creatorWalletPublic = await this.resolveUserWalletPublic(user);
+    const matchId = await nextMatchId();
+    const uploadedTopicCid = await ipfsService.uploadJSON(
+      {
+        topic: safeTopic,
+        matchId,
+        createdBy: user.clerkId,
+      },
+      `battle-topic-${matchId}`
+    );
+    const topicCid = uploadedTopicCid || `local-topic-${matchId}`;
+
+    const entryTxHash = await escrowService.transferFromUserToEscrow({
+      user,
+      amountXlm: fee,
+      memo: `battle_entry_${matchId}`,
+    });
+
+    let chainCreate = null;
+    try {
+      chainCreate = await chainService.createMatchOnChain({
+        entryFee: fee,
+        topicCid,
+        sourceSecret: escrowService.getUserSecret(user),
+        sourcePublic: creatorWalletPublic,
+      });
+    } catch (error) {
+      try {
+        await escrowService.transferFromEscrow({
+          toPublicKey: creatorWalletPublic,
+          amountXlm: fee,
+          memo: `entry_refund_${matchId}`,
+        });
+      } catch (refundError) {
+        logger.error('Entry refund failed after create_match failure', {
+          matchId,
+          message: refundError?.message,
+        });
+      }
+      throw error;
+    }
+
+    const dh = toNumber(durationHours, 24);
+    const expiresAt = new Date(Date.now() + dh * 60 * 60 * 1000);
+
+    const battle = await Battle.create({
+      matchId,
+      creator: user._id,
+      player1: user._id,
+      player1Wallet: creatorWalletPublic,
+      topic: safeTopic,
+      topicCid,
+      entryFee: fee,
+      durationHours: dh,
+      expiresAt,
+      status: 'open',
+      txHash: chainCreate.txHash,
+      chain: {
+        onChainMatchId: chainCreate.onChainMatchId,
+        createTxHash: chainCreate.txHash,
+        voteTxHashes: [],
+      },
+      finance: {
+        entryTxPlayer1: entryTxHash,
+        entryTxPlayer2: '',
+        voteStakeTxHashes: [],
+        payoutTxHashes: [],
+      },
+    });
+
+    await trackEvent('battle_created', user._id, {
+      matchId,
+      entryFee: fee,
+      onChainMatchId: chainCreate.onChainMatchId,
+      entryTxHash,
+      createTxHash: chainCreate.txHash,
+    });
+
+    const io = getIO();
+    if (io) {
+      io.to('lobby').emit('open_battles_updated', await this.getOpenBattles());
+    }
+
+    this.startTotalDurationTimer(matchId);
+
+    return this.getBattleByMatchId(battle.matchId);
+  }
+
+  async joinBattle({ user, matchId }) {
+    if (!user?.walletPublicKey || !user?.walletEncryptedSecret) {
+      throw new Error('Wallet with signing capability is required to join battle');
+    }
+
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) {
+      throw new Error('Battle not found');
+    }
+    if (battle.status !== 'open') {
+      throw new Error('Battle is not open');
+    }
+    if (String(battle.player1) === String(user._id)) {
+      throw new Error('Cannot join your own battle');
+    }
+
+    const challengerWalletPublic = await this.resolveUserWalletPublic(user);
+    const now = new Date();
+    const updated = await Battle.findOneAndUpdate(
+      { _id: battle._id, status: 'open', player2: null },
+      {
+        $set: {
+          player2: user._id,
+          player2Wallet: challengerWalletPublic,
+          status: 'active',
+          startedAt: now,
+        },
+      },
+      { new: true }
+    );
+    if (!updated) {
+      throw new Error('Battle was already joined by another player');
+    }
+
+    const onChainMatchId = getOnChainMatchId(updated);
+    let entryTxHash = '';
+    try {
+      entryTxHash = await escrowService.transferFromUserToEscrow({
+        user,
+        amountXlm: updated.entryFee,
+        memo: `battle_entry_${updated.matchId}_p2`,
+      });
+      const joinTxHash = await chainService.joinMatchOnChain({
+        onChainMatchId,
+        playerPublic: challengerWalletPublic,
+        sourceSecret: escrowService.getUserSecret(user),
+      });
+      updated.chain = {
+        ...(updated.chain || {}),
+        joinTxHash,
+      };
+      updated.finance = {
+        ...(updated.finance || {}),
+        entryTxPlayer2: entryTxHash,
+      };
+      await updated.save();
+    } catch (error) {
+      if (entryTxHash) {
+        try {
+          await escrowService.transferFromEscrow({
+            toPublicKey: user.walletPublicKey,
+            amountXlm: updated.entryFee,
+            memo: `entry_refund_${updated.matchId}_p2`,
+          });
+        } catch (refundError) {
+          logger.error('Join entry refund failed', { matchId, message: refundError?.message });
+        }
+      }
+      updated.player2 = null;
+      updated.player2Wallet = '';
+      updated.status = 'open';
+      updated.startedAt = null;
+      await updated.save();
+      throw error;
+    }
+
+    await trackEvent('battle_joined', user._id, { matchId, onChainMatchId, entryTxHash });
+
+    this.startBattleCountdown(updated.matchId);
+
+    const io = getIO();
+    if (io) {
+      const battlePayload = await this.getBattleByMatchId(updated.matchId);
+      io.to(`battle_${updated.matchId}`).emit('player_joined', {
+        matchId: updated.matchId,
+        playerId: String(user._id),
+        battle: battlePayload,
+      });
+      io.to('lobby').emit('open_battles_updated', await this.getOpenBattles());
+    }
+
+    return this.getBattleByMatchId(updated.matchId);
+  }
+
+  startRoastTimer(matchId, durationSec) {
+    const io = getIO();
+    const remaining = Math.max(0, Number(durationSec || 0));
+    if (remaining <= 0) return;
+    timerService.schedule({
+      matchId: `roast_${matchId}`,
+      durationSec: remaining,
+      onExpire: async () => {
+        const battle = await Battle.findOne({ matchId });
+        if (!battle || battle.status !== 'active') return;
+        if (battle.roast1 && battle.roast2) return;
+
+        battle.status = 'cancelled';
+        battle.endedAt = new Date();
+        const refundTxHashes = await this.refundBattleEscrowOnCancel(battle);
+        battle.finance = {
+          ...(battle.finance || {}),
+          payoutTxHashes: [...((battle.finance || {}).payoutTxHashes || []), ...refundTxHashes],
+        };
+        await battle.save();
+        timerService.clear(`roast_${matchId}`);
+        timerService.clear(`total_${matchId}`);
+        io?.to(`battle_${matchId}`).emit('battle_result', winnerPayload(battle));
+      },
+    });
+  }
+
+  startBattleCountdown(matchId) {
+    const io = getIO();
+    timerService.schedule({
+      matchId: `start_${matchId}`,
+      durationSec: BATTLE_START_COUNTDOWN_SECONDS,
+      onTick: (remaining) => {
+        io?.to(`battle_${matchId}`).emit('countdown_tick', {
+          matchId,
+          phase: 'starting',
+          remaining,
+        });
+      },
+      onExpire: async () => {
+        const battle = await Battle.findOne({ matchId });
+        if (!battle || battle.status !== 'active') return;
+        const battlePayload = await this.getBattleByMatchId(matchId);
+        const remainingSec = battle?.expiresAt
+          ? Math.max(0, Math.ceil((new Date(battle.expiresAt) - Date.now()) / 1000))
+          : 0;
+        io?.to(`battle_${matchId}`).emit('battle_started', {
+          matchId,
+          durationSec: remainingSec,
+          battle: battlePayload,
+        });
+        this.startRoastTimer(matchId, remainingSec);
+      },
+    });
+  }
+
+  startTotalDurationTimer(matchId) {
+    (async () => {
+      try {
+        const battle = await Battle.findOne({ matchId });
+        const durationSec = battle?.expiresAt
+          ? Math.max(0, Math.ceil((new Date(battle.expiresAt) - Date.now()) / 1000))
+          : 0;
+        if (durationSec <= 0) return;
+        timerService.schedule({
+          matchId: `total_${matchId}`,
+          durationSec,
+          onExpire: async () => this.autoEvaluateBattle(matchId),
+        });
+      } catch (error) {
+        logger.error('Failed to start total duration timer', { matchId, message: error?.message });
+      }
+    })();
+  }
+
+  async autoEvaluateBattle(matchId) {
+    timerService.clear(`roast_${matchId}`);
+    timerService.clear(`voting_${matchId}`);
+    timerService.clear(`total_${matchId}`);
+
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) return;
+    if (['ended', 'draw', 'cancelled'].includes(battle.status)) return;
+
+    if (battle.status === 'open') {
+      battle.status = 'cancelled';
+      battle.endedAt = new Date();
+      const refundTxHashes = await this.refundBattleEscrowOnCancel(battle);
+      battle.finance = {
+        ...(battle.finance || {}),
+        payoutTxHashes: [...((battle.finance || {}).payoutTxHashes || []), ...refundTxHashes],
+      };
+      await battle.save();
+      const io = getIO();
+      io?.to(`battle_${matchId}`).emit('battle_result', winnerPayload(battle));
+      io?.to('lobby').emit('open_battles_updated', await this.getOpenBattles());
+      return;
+    }
+
+    if (battle.status === 'active') {
+      const bothRoastsOnChain = Boolean(battle.chain?.roast1TxHash && battle.chain?.roast2TxHash);
+      if (!bothRoastsOnChain) {
+        battle.status = 'cancelled';
+        battle.endedAt = new Date();
+        const refundTxHashes = await this.refundBattleEscrowOnCancel(battle);
+        battle.finance = {
+          ...(battle.finance || {}),
+          payoutTxHashes: [...((battle.finance || {}).payoutTxHashes || []), ...refundTxHashes],
+        };
+        await battle.save();
+        const io = getIO();
+        io?.to(`battle_${matchId}`).emit('battle_result', winnerPayload(battle));
+        io?.to('lobby').emit('open_battles_updated', await this.getOpenBattles());
+        return;
+      }
+    }
+
+    await this.finalizeBattle({ matchId, actorUserId: null, internalCall: true });
+  }
+
+  startVotingTimer(matchId, durationSec) {
+    const io = getIO();
+    const remaining = Math.max(0, Number(durationSec || 0));
+    if (remaining <= 0) return;
+    timerService.schedule({
+      matchId: `voting_${matchId}`,
+      durationSec: remaining,
+      onTick: (remaining) => {
+        io?.to(`battle_${matchId}`).emit('countdown_tick', {
+          matchId,
+          phase: 'voting',
+          remaining,
+        });
+      },
+      onExpire: async () => {
+        try {
+          const pendingAtStart = this.getPendingVoteCount(matchId);
+          let waitedForPendingVotes = false;
+          const maxWaitMs = Math.max(0, VOTING_FINALIZE_MAX_WAIT_SECONDS) * 1000;
+          if (maxWaitMs > 0 && pendingAtStart > 0) {
+            waitedForPendingVotes = await this.waitForPendingVotes(matchId, maxWaitMs);
+          }
+          if (waitedForPendingVotes && VOTING_FINALIZE_GRACE_SECONDS > 0) {
+            await new Promise((resolve) => setTimeout(resolve, VOTING_FINALIZE_GRACE_SECONDS * 1000));
+          }
+          await this.finalizeBattle({ matchId, actorUserId: null, internalCall: true });
+        } catch (error) {
+          logger.error('Auto finalize failed', { matchId, message: error?.message });
+        }
+      },
+    });
+  }
+
+  async submitRoast({ user, matchId, text }) {
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) throw new Error('Battle not found');
+    if (battle.status !== 'active') throw new Error('Battle is not accepting roast submissions');
+
+    const safeText = sanitizeText(text, 500);
+    if (!safeText) throw new Error('Roast text is required');
+
+    const isPlayer1 = String(battle.player1) === String(user._id);
+    const isPlayer2 = String(battle.player2) === String(user._id);
+    if (!isPlayer1 && !isPlayer2) throw new Error('Only players can submit roasts');
+
+    const uploadedRoastCid = await ipfsService.uploadJSON(
+      { matchId, playerId: String(user._id), roast: safeText },
+      `battle-roast-${matchId}-${String(user._id).slice(-6)}`
+    );
+    const roastCid = uploadedRoastCid || `local-roast-${matchId}-${String(user._id).slice(-6)}`;
+
+    const onChainMatchId = getOnChainMatchId(battle);
+    const playerPublic = await this.resolveUserWalletPublic(user);
+    if (!playerPublic) {
+      throw new Error('Missing player wallet for on-chain roast mirroring');
+    }
+
+    const roastTxHash = await chainService.submitRoastOnChain({
+      onChainMatchId,
+      roastCid,
+      playerPublic,
+      sourceSecret: escrowService.getUserSecret(user),
+    });
+
+    if (isPlayer1) {
+      battle.roast1 = safeText;
+      battle.roast1Cid = roastCid;
+      battle.player1Wallet = playerPublic;
+      battle.chain = { ...(battle.chain || {}), roast1TxHash: roastTxHash };
+    }
+    if (isPlayer2) {
+      battle.roast2 = safeText;
+      battle.roast2Cid = roastCid;
+      battle.player2Wallet = playerPublic;
+      battle.chain = { ...(battle.chain || {}), roast2TxHash: roastTxHash };
+    }
+
+    const bothReady = Boolean(battle.roast1 && battle.roast2);
+    if (bothReady && battle.status !== 'voting') {
+      battle.status = 'voting';
+    }
+
+    await battle.save();
+    await trackEvent('roast_submitted', user._id, { matchId, roastTxHash });
+
+    const io = getIO();
+    io?.to(`battle_${matchId}`).emit('roast_submitted', {
+      matchId,
+      userId: String(user._id),
+      roast: safeText,
+    });
+
+    if (bothReady) {
+      timerService.clear(`roast_${matchId}`);
+      const remainingSec = battle?.expiresAt
+        ? Math.max(0, Math.ceil((new Date(battle.expiresAt) - Date.now()) / 1000))
+        : 0;
+      this.startVotingTimer(matchId, remainingSec);
+      io?.to(`battle_${matchId}`).emit('voting_started', {
+        matchId,
+        durationSec: remainingSec,
+      });
+    }
+
+    return this.getBattleByMatchId(matchId);
+  }
+
+  async castVote({ user, matchId, selectedPlayer }) {
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) throw new Error('Battle not found');
+    if (battle.status !== 'voting') throw new Error('Battle is not in voting window');
+    if (String(user._id) === String(battle.player1) || String(user._id) === String(battle.player2)) {
+      throw new Error('Players cannot vote in their own battle');
+    }
+
+    const selected = String(selectedPlayer || '');
+    const validSelection = [String(battle.player1), String(battle.player2)].includes(selected);
+    if (!validSelection) throw new Error('Invalid selected player');
+
+    const existing = await BattleVote.findOne({ battleId: battle._id, voter: user._id });
+    if (existing) throw new Error('Vote already recorded');
+    this.incrementPendingVote(matchId);
+
+    try {
+      const voterPublic = await this.resolveUserWalletPublic(user);
+      const selectedPlayerPublic = selected === String(battle.player1) ? battle.player1Wallet : battle.player2Wallet;
+      if (!isValidPublicKey(selectedPlayerPublic)) throw new Error('Missing selected player wallet for mirrored on-chain vote');
+
+      let voteStakeTxHash = '';
+      if (VOTE_STAKE_XLM > 0) {
+        voteStakeTxHash = await escrowService.transferFromUserToEscrow({
+          user,
+          amountXlm: VOTE_STAKE_XLM,
+          memo: `vote_stake_${matchId}`,
+        });
+      }
+
+      let voteTxHash = '';
+      try {
+        voteTxHash = await chainService.voteOnChain({
+          onChainMatchId: getOnChainMatchId(battle),
+          selectedPlayerPublic,
+          voterPublic,
+          sourceSecret: escrowService.getUserSecret(user),
+        });
+      } catch (error) {
+        if (voteStakeTxHash) {
+          try {
+            await escrowService.transferFromEscrow({
+              toPublicKey: voterPublic,
+              amountXlm: VOTE_STAKE_XLM,
+              memo: `vote_refund_${matchId}`,
+            });
+          } catch (refundError) {
+            logger.error('Vote stake refund failed', { matchId, message: refundError?.message });
+          }
+        }
+        throw error;
+      }
+
+      await BattleVote.create({
+        battleId: battle._id,
+        voter: user._id,
+        selectedPlayer: selected,
+        chainTxHash: voteTxHash,
+        stakeTxHash: voteStakeTxHash,
+      });
+
+      if (selected === String(battle.player1)) {
+        battle.votesPlayer1 += 1;
+      } else {
+        battle.votesPlayer2 += 1;
+      }
+      battle.chain = {
+        ...(battle.chain || {}),
+        voteTxHashes: [...((battle.chain || {}).voteTxHashes || []), voteTxHash],
+      };
+      if (voteStakeTxHash) {
+        battle.finance = {
+          ...(battle.finance || {}),
+          voteStakeTxHashes: [...((battle.finance || {}).voteStakeTxHashes || []), voteStakeTxHash],
+        };
+      }
+      await battle.save();
+
+      await trackEvent('vote_cast', user._id, { matchId, selectedPlayer: selected, voteTxHash, voteStakeTxHash });
+
+      const io = getIO();
+      io?.to(`battle_${matchId}`).emit('vote_update', {
+        matchId,
+        votesPlayer1: battle.votesPlayer1,
+        votesPlayer2: battle.votesPlayer2,
+      });
+
+      return this.getBattleByMatchId(matchId);
+    } finally {
+      this.decrementPendingVote(matchId);
+    }
+  }
+
+  async placePrediction({ user, matchId, selectedPlayer, amount }) {
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) throw new Error('Battle not found');
+    if (!['active', 'voting'].includes(battle.status)) throw new Error('Battle is not accepting predictions');
+    if (String(user._id) === String(battle.player1) || String(user._id) === String(battle.player2)) {
+      throw new Error('Players cannot place predictions');
+    }
+
+    const selected = String(selectedPlayer || '');
+    const validSelection = [String(battle.player1), String(battle.player2)].includes(selected);
+    if (!validSelection) throw new Error('Invalid selected player');
+
+    const parsedAmount = toNumber(amount, 0);
+    if (parsedAmount <= 0) throw new Error('Prediction amount must be greater than zero');
+
+    const existing = await Prediction.findOne({ battleId: battle._id, predictor: user._id });
+    if (existing) throw new Error('Prediction already placed');
+
+    const predictorPublic = await this.resolveUserWalletPublic(user);
+    const selectedPlayerPublic = selected === String(battle.player1) ? battle.player1Wallet : battle.player2Wallet;
+    if (!isValidPublicKey(selectedPlayerPublic)) throw new Error('Missing selected player wallet for mirrored on-chain prediction');
+
+    const escrowTxHash = await escrowService.transferFromUserToEscrow({
+      user,
+      amountXlm: parsedAmount,
+      memo: `prediction_${matchId}`,
+    });
+
+    let chainTxHash = '';
+    try {
+      chainTxHash = await chainService.predictOnChain({
+        onChainMatchId: getOnChainMatchId(battle),
+        selectedPlayerPublic,
+        amount: parsedAmount,
+        predictorPublic,
+        sourceSecret: escrowService.getUserSecret(user),
+      });
+    } catch (error) {
+      try {
+        await escrowService.transferFromEscrow({
+          toPublicKey: predictorPublic,
+          amountXlm: updated.entryFee,
+          memo: `prediction_refund_${matchId}`,
+        });
+      } catch (refundError) {
+        logger.error('Prediction refund failed', { matchId, message: refundError?.message });
+      }
+      throw error;
+    }
+
+    const prediction = await Prediction.create({
+      battleId: battle._id,
+      predictor: user._id,
+      selectedPlayer: selected,
+      amount: parsedAmount,
+      escrowTxHash,
+      chainTxHash,
+    });
+
+    battle.finance = {
+      ...(battle.finance || {}),
+      predictionPool: toNumber((battle.finance || {}).predictionPool, 0) + parsedAmount,
+    };
+    await battle.save();
+
+    await trackEvent('prediction_placed', user._id, {
+      matchId,
+      selectedPlayer: selected,
+      amount: parsedAmount,
+      escrowTxHash,
+      chainTxHash,
+    });
+
+    const io = getIO();
+    io?.to(`battle_${matchId}`).emit('prediction_placed', {
+      matchId,
+      predictorId: String(user._id),
+      selectedPlayer: selected,
+      amount: parsedAmount,
+    });
+
+    return prediction;
+  }
+
+  async settlePredictions({ battle }) {
+    const predictions = await Prediction.find({ battleId: battle._id, settled: false });
+    if (predictions.length === 0) return [];
+
+    const payoutHashes = [];
+    const predictorIds = predictions.map((prediction) => prediction.predictor);
+    const predictorUsers = await User.find({ _id: { $in: predictorIds } }).select('_id walletPublicKey');
+    const walletByUserId = new Map(predictorUsers.map((user) => [String(user._id), user.walletPublicKey]));
+
+    if (battle.status === 'draw' || !battle.winner) {
+      for (const prediction of predictions) {
+        prediction.settled = true;
+        prediction.won = false;
+        prediction.payoutAmount = 0;
+        const wallet = walletByUserId.get(String(prediction.predictor));
+        if (wallet) {
+          prediction.payoutTxHash = await escrowService.transferFromEscrow({
+            toPublicKey: wallet,
+            amountXlm: prediction.amount,
+            memo: `pred_refund_${battle.matchId}`,
+          });
+          prediction.payoutAmount = prediction.amount;
+          payoutHashes.push(prediction.payoutTxHash);
+        }
+        await prediction.save();
+      }
+      return payoutHashes;
+    }
+
+    const winnerId = String(battle.winner);
+    const winningPredictions = predictions.filter((prediction) => String(prediction.selectedPlayer) === winnerId);
+    const totalPool = predictions.reduce((sum, prediction) => sum + toNumber(prediction.amount, 0), 0);
+    const winnersPool = winningPredictions.reduce((sum, prediction) => sum + toNumber(prediction.amount, 0), 0);
+
+    if (winningPredictions.length === 0 || winnersPool <= 0) {
+      for (const prediction of predictions) {
+        prediction.settled = true;
+        prediction.won = false;
+        prediction.payoutAmount = 0;
+        const wallet = walletByUserId.get(String(prediction.predictor));
+        if (wallet) {
+          prediction.payoutTxHash = await escrowService.transferFromEscrow({
+            toPublicKey: wallet,
+            amountXlm: prediction.amount,
+            memo: `pred_refund_${battle.matchId}`,
+          });
+          prediction.payoutAmount = prediction.amount;
+          payoutHashes.push(prediction.payoutTxHash);
+        }
+        await prediction.save();
+      }
+      return payoutHashes;
+    }
+
+    let distributed = 0;
+    for (let index = 0; index < winningPredictions.length; index += 1) {
+      const prediction = winningPredictions[index];
+      const wallet = walletByUserId.get(String(prediction.predictor));
+      prediction.settled = true;
+      prediction.won = true;
+      prediction.payoutAmount = 0;
+      if (wallet) {
+        let payout = Number((totalPool * (toNumber(prediction.amount, 0) / winnersPool)).toFixed(7));
+        if (index === winningPredictions.length - 1) {
+          payout = Number((totalPool - distributed).toFixed(7));
+        }
+        distributed = Number((distributed + payout).toFixed(7));
+        prediction.payoutTxHash = await escrowService.transferFromEscrow({
+          toPublicKey: wallet,
+          amountXlm: payout,
+          memo: `pred_win_${battle.matchId}`,
+        });
+        prediction.payoutAmount = payout;
+        payoutHashes.push(prediction.payoutTxHash);
+      }
+      await prediction.save();
+    }
+
+    const losers = predictions.filter((prediction) => String(prediction.selectedPlayer) !== winnerId);
+    for (const prediction of losers) {
+      prediction.settled = true;
+      prediction.won = false;
+      prediction.payoutAmount = 0;
+      await prediction.save();
+    }
+
+    return payoutHashes;
+  }
+
+  async refundBattleEscrowOnCancel(battle) {
+    const refundTxHashes = [];
+
+    if (battle.finance?.entryTxPlayer1 && battle.player1Wallet) {
+      refundTxHashes.push(await escrowService.transferFromEscrow({
+        toPublicKey: battle.player1Wallet,
+        amountXlm: battle.entryFee,
+        memo: `cancel_refund_${battle.matchId}_p1`,
+      }));
+    }
+
+    if (battle.finance?.entryTxPlayer2 && battle.player2Wallet) {
+      refundTxHashes.push(await escrowService.transferFromEscrow({
+        toPublicKey: battle.player2Wallet,
+        amountXlm: battle.entryFee,
+        memo: `cancel_refund_${battle.matchId}_p2`,
+      }));
+    }
+
+    const pendingPredictions = await Prediction.find({
+      battleId: battle._id,
+      settled: false,
+    });
+    if (pendingPredictions.length > 0) {
+      const predictorIds = pendingPredictions.map((prediction) => prediction.predictor);
+      const predictorUsers = await User.find({ _id: { $in: predictorIds } }).select('_id walletPublicKey');
+      const walletByUserId = new Map(predictorUsers.map((user) => [String(user._id), user.walletPublicKey]));
+
+      for (const prediction of pendingPredictions) {
+        const wallet = walletByUserId.get(String(prediction.predictor));
+        prediction.payoutAmount = 0;
+        if (wallet) {
+          prediction.payoutTxHash = await escrowService.transferFromEscrow({
+            toPublicKey: wallet,
+            amountXlm: prediction.amount,
+            memo: `pred_cancel_refund_${battle.matchId}`,
+          });
+          prediction.payoutAmount = prediction.amount;
+          refundTxHashes.push(prediction.payoutTxHash);
+        }
+        prediction.settled = true;
+        prediction.won = false;
+        await prediction.save();
+      }
+    }
+
+    return refundTxHashes;
+  }
+
+  async finalizeBattle({ matchId, actorUserId, internalCall = false }) {
+    timerService.clear(`roast_${matchId}`);
+    timerService.clear(`voting_${matchId}`);
+    timerService.clear(`total_${matchId}`);
+
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) throw new Error('Battle not found');
+
+    if (!['active', 'voting'].includes(battle.status)) {
+      if (!internalCall) throw new Error('Battle cannot be finalized in current state');
+      return this.getBattleByMatchId(matchId);
+    }
+
+    if (!battle.chain?.onChainMatchId || !battle.chain?.joinTxHash || !battle.chain?.roast1TxHash || !battle.chain?.roast2TxHash) {
+      throw new Error('Battle is not fully mirrored on-chain yet');
+    }
+
+    const [vote1, vote2] = await Promise.all([
+      BattleVote.countDocuments({ battleId: battle._id, selectedPlayer: battle.player1 }),
+      BattleVote.countDocuments({ battleId: battle._id, selectedPlayer: battle.player2 }),
+    ]);
+    battle.votesPlayer1 = vote1;
+    battle.votesPlayer2 = vote2;
+    logger.info('Finalizing battle vote snapshot', {
+      matchId,
+      vote1,
+      vote2,
+      pendingVotes: this.getPendingVoteCount(matchId),
+    });
+    battle.endedAt = new Date();
+
+    const onChainMatchId = getOnChainMatchId(battle);
+    if (vote1 === vote2) {
+      battle.status = 'draw';
+      battle.winner = null;
+      battle.txHash = await chainService.refundDrawOnChain({ onChainMatchId });
+    } else {
+      battle.status = 'ended';
+      battle.winner = vote1 > vote2 ? battle.player1 : battle.player2;
+      battle.txHash = await chainService.finalizeMatchOnChain({ onChainMatchId });
+    }
+    battle.chain = {
+      ...(battle.chain || {}),
+      finalizeTxHash: battle.txHash,
+    };
+
+    const payoutTxHashes = [];
+    if (battle.status === 'draw') {
+      if (battle.finance?.entryTxPlayer1 && battle.player1Wallet) {
+        payoutTxHashes.push(await escrowService.transferFromEscrow({
+          toPublicKey: battle.player1Wallet,
+          amountXlm: battle.entryFee,
+          memo: `draw_refund_${matchId}_p1`,
+        }));
+      }
+      if (battle.finance?.entryTxPlayer2 && battle.player2Wallet) {
+        payoutTxHashes.push(await escrowService.transferFromEscrow({
+          toPublicKey: battle.player2Wallet,
+          amountXlm: battle.entryFee,
+          memo: `draw_refund_${matchId}_p2`,
+        }));
+      }
+    } else if (battle.winner) {
+      const winnerUser = await User.findById(battle.winner).select('walletPublicKey');
+      const winnerWallet = winnerUser?.walletPublicKey;
+      const entryPot =
+        (battle.finance?.entryTxPlayer1 ? battle.entryFee : 0) +
+        (battle.finance?.entryTxPlayer2 ? battle.entryFee : 0);
+      if (winnerWallet && entryPot > 0) {
+        payoutTxHashes.push(await escrowService.transferFromEscrow({
+          toPublicKey: winnerWallet,
+          amountXlm: entryPot,
+          memo: `battle_win_${matchId}`,
+        }));
+      }
+    }
+
+    const predictionPayoutTxs = await this.settlePredictions({ battle });
+    battle.finance = {
+      ...(battle.finance || {}),
+      payoutTxHashes: [...((battle.finance || {}).payoutTxHashes || []), ...payoutTxHashes, ...predictionPayoutTxs],
+    };
+
+    await battle.save();
+
+    const serializedBattle = this.normalizeBattle(await Battle.findById(battle._id));
+    if (serializedBattle) {
+      const resultCid = await ipfsService.uploadJSON(
+        {
+          matchId,
+          status: serializedBattle.status,
+          winner: serializedBattle.winner || null,
+          votesPlayer1: serializedBattle.votesPlayer1,
+          votesPlayer2: serializedBattle.votesPlayer2,
+          entryFee: serializedBattle.entryFee,
+          txHash: serializedBattle.txHash || '',
+          endedAt: serializedBattle.endedAt,
+        },
+        `battle-result-${matchId}`
+      );
+      if (resultCid) {
+        await trackEvent('battle_result_metadata_uploaded', actorUserId, { matchId, resultCid });
+      }
+    }
+
+    const player1 = await User.findById(battle.player1);
+    const player2 = battle.player2 ? await User.findById(battle.player2) : null;
+
+    if (player1) player1.totalBattles = toNumber(player1.totalBattles, 0) + 1;
+    if (player2) player2.totalBattles = toNumber(player2.totalBattles, 0) + 1;
+
+    if (battle.status === 'ended' && battle.winner) {
+      const winnerId = String(battle.winner);
+      const loserId = winnerId === String(battle.player1) ? String(battle.player2) : String(battle.player1);
+      const winnerUser = winnerId === String(player1?._id) ? player1 : player2;
+      const loserUser = loserId === String(player1?._id) ? player1 : player2;
+
+      if (winnerUser) {
+        winnerUser.wins = toNumber(winnerUser.wins, 0) + 1;
+        winnerUser.xp = toNumber(winnerUser.xp, 0) + 100;
+        winnerUser.rankPoints = toNumber(winnerUser.rankPoints, 0) + 25;
+        if (!winnerUser.badges.includes('First Blood')) winnerUser.badges.push('First Blood');
+      }
+      if (loserUser) {
+        loserUser.losses = toNumber(loserUser.losses, 0) + 1;
+        loserUser.xp = toNumber(loserUser.xp, 0) + 15;
+      }
+    } else {
+      if (player1) player1.xp = toNumber(player1.xp, 0) + 20;
+      if (player2) player2.xp = toNumber(player2.xp, 0) + 20;
+    }
+
+    if (player1) await player1.save();
+    if (player2) await player2.save();
+
+    await trackEvent('battle_finished', actorUserId, {
+      matchId,
+      status: battle.status,
+      winner: battle.winner ? String(battle.winner) : null,
+      finalizeTxHash: battle.txHash,
+      payoutTxHashes,
+      predictionPayoutTxs,
+    });
+
+    const io = getIO();
+    if (io) {
+      io.to(`battle_${matchId}`).emit('battle_result', winnerPayload(battle));
+      const leaderboard = await User.find({ isBanned: false })
+        .sort({ rankPoints: -1, xp: -1, wins: -1 })
+        .limit(50)
+        .select('username avatar imageUrl xp wins losses rankPoints clerkId badges totalBattles');
+      io.to('lobby').emit('leaderboard_updated', leaderboard.map((user) => user.toPublicJSON()));
+    }
+
+    return this.getBattleByMatchId(matchId);
+  }
+
+  async cancelBattle({ user, matchId }) {
+    timerService.clear(`roast_${matchId}`);
+    timerService.clear(`voting_${matchId}`);
+    timerService.clear(`total_${matchId}`);
+
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) throw new Error('Battle not found');
+    if (battle.status !== 'open') throw new Error('Only open battles can be cancelled');
+    if (String(battle.creator) !== String(user._id)) throw new Error('Only creator can cancel this battle');
+
+    const refundTxHashes = await this.refundBattleEscrowOnCancel(battle);
+
+    battle.status = 'cancelled';
+    battle.endedAt = new Date();
+    battle.finance = {
+      ...(battle.finance || {}),
+      payoutTxHashes: [...((battle.finance || {}).payoutTxHashes || []), ...refundTxHashes],
+    };
+    await battle.save();
+
+    await trackEvent('battle_cancelled', user._id, { matchId });
+    const io = getIO();
+    io?.to('lobby').emit('open_battles_updated', await this.getOpenBattles());
+
+    return this.getBattleByMatchId(matchId);
+  }
+
+  async predictionSummary(matchId) {
+    const battle = await Battle.findOne({ matchId });
+    if (!battle) throw new Error('Battle not found');
+
+    const predictions = await Prediction.find({ battleId: battle._id });
+    const totalAmount = predictions.reduce((sum, prediction) => sum + toNumber(prediction.amount, 0), 0);
+    const onPlayer1 = predictions
+      .filter((prediction) => String(prediction.selectedPlayer) === String(battle.player1))
+      .reduce((sum, prediction) => sum + toNumber(prediction.amount, 0), 0);
+    const onPlayer2 = predictions
+      .filter((prediction) => String(prediction.selectedPlayer) === String(battle.player2))
+      .reduce((sum, prediction) => sum + toNumber(prediction.amount, 0), 0);
+
+    return {
+      matchId,
+      totalPredictions: predictions.length,
+      totalAmount,
+      onPlayer1,
+      onPlayer2,
+    };
+  }
+
+  async recoverStuckBattles() {
+    const now = new Date();
+
+    const future = await Battle.find({
+      expiresAt: { $gt: now },
+      status: { $in: ['open', 'active', 'voting'] },
+    });
+    if (future.length > 0) {
+      logger.info(`Recovering ${future.length} future-expiring stuck battles after restart`);
+      for (const battle of future) {
+        const durationSec = Math.max(0, Math.ceil((new Date(battle.expiresAt) - Date.now()) / 1000));
+        if (durationSec <= 0) continue;
+        if (battle.status === 'open') {
+          this.startTotalDurationTimer(battle.matchId);
+        } else if (battle.status === 'active') {
+          this.startRoastTimer(battle.matchId, durationSec);
+        } else if (battle.status === 'voting') {
+          this.startVotingTimer(battle.matchId, durationSec);
+        }
+      }
+    }
+
+    const expired = await Battle.find({
+      expiresAt: { $lte: now },
+      status: { $in: ['open', 'active', 'voting'] },
+    });
+    if (expired.length > 0) {
+      logger.info(`Auto-resolving ${expired.length} already-expired stuck battles`);
+      for (const battle of expired) {
+        try {
+          await this.autoEvaluateBattle(battle.matchId);
+        } catch (error) {
+          logger.error('Failed to auto-resolve expired battle', {
+            matchId: battle.matchId,
+            message: error?.message,
+          });
+        }
+      }
+    }
+  }
+}
+
+module.exports = new BattleService();
