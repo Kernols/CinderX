@@ -132,7 +132,7 @@ Set that value as `STELLAR_CONTRACT_ID` to use the existing deployment. Deploy a
 ### Build the WASM
 
 ```powershell
-cd contracts\CinderX
+cd contracts\cinderx
 rustup target add wasm32v1-none
 cargo build --target wasm32v1-none --release
 cargo test
@@ -141,7 +141,7 @@ cargo test
 The compiled contract is written to:
 
 ```text
-contracts/CinderX/target/wasm32v1-none/release/CinderX.wasm
+contracts/cinderx/target/wasm32v1-none/release/cinderx.wasm
 ```
 
 ### Create and fund a testnet deployer
@@ -155,11 +155,11 @@ stellar keys address CinderX-deployer
 
 ### Deploy a fresh testnet instance
 
-Run this command from `contracts/CinderX`:
+Run this command from `contracts/cinderx`:
 
 ```powershell
 stellar contract deploy `
-  --wasm target/wasm32v1-none/release/CinderX.wasm `
+  --wasm target/wasm32v1-none/release/cinderx.wasm `
   --source-account CinderX-deployer `
   --network testnet `
   --alias CinderX
@@ -240,3 +240,4 @@ The frontend workflow defines the Vercel scope and project in the workflow file.
 - [Architecture](./ARCHITECTURE.md)
 - [Security checklist](./security_checklist.md)
 - [README](./README.md)
+
