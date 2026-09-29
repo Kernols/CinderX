@@ -16,7 +16,7 @@ class IpfsService {
         'https://api.pinata.cloud/pinning/pinJSONToIPFS',
         {
           pinataContent: content,
-          pinataMetadata: { name: name || `roastellar-${Date.now()}` },
+          pinataMetadata: { name: name || `CinderX-${Date.now()}` },
         },
         {
           headers: {

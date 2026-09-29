@@ -21,7 +21,7 @@ const walletAuthLimiter = rateLimit({
 
 function buildChallenge({ walletAddress, nonce }) {
   return [
-    'Roastellar Wallet Login',
+    'CinderX Wallet Login',
     `Address: ${walletAddress}`,
     `Nonce: ${nonce}`,
     'Sign this message to prove wallet ownership.',
@@ -110,7 +110,7 @@ router.post('/wallet/challenge', walletAuthLimiter, async (req, res) => {
     const pseudoClerkId = `wallet:${walletAddress}`;
     const fallbackName = `wallet_${walletAddress.slice(0, 8)}`;
     const username = usernameInput || fallbackName;
-    const fallbackEmail = `${walletAddress.toLowerCase()}@wallet.roastellar.local`;
+    const fallbackEmail = `${walletAddress.toLowerCase()}@wallet.CinderX.local`;
 
     let user = await findWalletAccount(walletAddress);
     if (!user) {

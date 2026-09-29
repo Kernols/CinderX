@@ -2,7 +2,7 @@
 
 ## Project status
 
-Roastellar is currently a **testnet MVP**. It is not approved for mainnet funds or production custody.
+CinderX is currently a **testnet MVP**. It is not approved for mainnet funds or production custody.
 
 ## Supported versions
 
@@ -31,7 +31,7 @@ In scope:
 Out of scope:
 - social engineering, phishing, or denial-of-service testing
 - issues requiring access to someone else’s account or wallet
-- vulnerabilities only in third-party hosted services, unless caused by Roastellar configuration
+- vulnerabilities only in third-party hosted services, unless caused by CinderX configuration
 - testnet-only issues with no realistic security impact
 
 ## Safe testing

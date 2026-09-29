@@ -54,7 +54,7 @@ async function deploy() {
   const pk = kp.publicKey()
   console.log('Deployer:', pk)
 
-  const wasmPath = path.join(__dirname, '..', '..', 'contracts', 'roastellar', 'target', 'wasm32v1-none', 'release', 'roastellar.wasm')
+  const wasmPath = path.join(__dirname, '..', '..', 'contracts', 'CinderX', 'target', 'wasm32v1-none', 'release', 'CinderX.wasm')
   if (!fs.existsSync(wasmPath)) throw new Error('WASM not found')
   const wasm = fs.readFileSync(wasmPath)
   console.log('WASM:', (wasm.length / 1024).toFixed(1), 'KB')

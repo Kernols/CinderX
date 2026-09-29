@@ -70,10 +70,10 @@ pub enum DataKey {
 }
 
 #[contract]
-pub struct Roastellar;
+pub struct CinderX;
 
 #[contractimpl]
-impl Roastellar {
+impl CinderX {
     pub fn register_user(e: Env, user: Address, username: String, profile_cid: String) {
         user.require_auth();
         let key = DataKey::User(user.clone());
@@ -366,14 +366,14 @@ impl Roastellar {
 mod tests {
     use soroban_sdk::{Env, Address, String};
     use soroban_sdk::testutils::Address as _;
-    use crate::{Roastellar, RoastellarClient, MatchStatus, Badge};
+    use crate::{CinderX, CinderXClient, MatchStatus, Badge};
 
     #[test]
     fn test_register_user() {
         let env = Env::default();
         let user = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username = String::from_str(&env, "testuser");
         let profile_cid = String::from_str(&env, "QmProfile");
@@ -387,8 +387,8 @@ mod tests {
     fn test_duplicate_registration() {
         let env = Env::default();
         let user = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username = String::from_str(&env, "testuser");
         let profile_cid = String::from_str(&env, "QmProfile");
@@ -401,8 +401,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");
@@ -426,8 +426,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");
@@ -453,8 +453,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");
@@ -482,8 +482,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");
@@ -505,8 +505,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");
@@ -528,8 +528,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");
@@ -558,8 +558,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");
@@ -589,8 +589,8 @@ mod tests {
         let env = Env::default();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        let contract_id = env.register(Roastellar, ());
-        let client = RoastellarClient::new(&env, &contract_id);
+        let contract_id = env.register(CinderX, ());
+        let client = CinderXClient::new(&env, &contract_id);
         env.mock_all_auths();
         let username1 = String::from_str(&env, "user1");
         let username2 = String::from_str(&env, "user2");

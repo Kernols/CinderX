@@ -41,7 +41,7 @@ function buildUserSeed(claims, clerkUser) {
   const email =
     clerkUser?.emailAddresses?.[0]?.emailAddress ||
     emailFromClaims ||
-    `${username}@local.roastellar.dev`;
+    `${username}@local.CinderX.dev`;
 
   return {
     email,

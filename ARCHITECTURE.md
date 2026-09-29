@@ -1,6 +1,6 @@
-# Roastellar architecture
+# CinderX architecture
 
-Roastellar is a production MVP for two-player roast battles on Stellar testnet. The web application combines a responsive Next.js client, an authenticated Node.js API with real-time battle updates, MongoDB application data, Pinata/IPFS content storage, and a Soroban contract for signed battle lifecycle actions.
+CinderX is a production MVP for two-player roast battles on Stellar testnet. The web application combines a responsive Next.js client, an authenticated Node.js API with real-time battle updates, MongoDB application data, Pinata/IPFS content storage, and a Soroban contract for signed battle lifecycle actions.
 
 ## System context
 
@@ -15,7 +15,7 @@ flowchart TB
     B --> P["Pinata / IPFS\nroasts and profile images"]
     B --> H["Stellar Horizon\nXLM account and payment operations"]
     B --> R["Soroban RPC\nStellar testnet"]
-    R --> C["Roastellar contract\nmatch state and signed actions"]
+    R --> C["CinderX contract\nmatch state and signed actions"]
 ```
 
 ## Component responsibilities
@@ -99,7 +99,7 @@ The database is the application's read/reporting layer; the Soroban contract hol
 
 ## Soroban contract
 
-Source: `contracts/roastellar/src/lib.rs`
+Source: `contracts/CinderX/src/lib.rs`
 
 The contract is built with Rust 2021 and `soroban-sdk` 27. It maintains contract types for users, matches, predictions, badges, and per-match participation markers.
 
@@ -144,7 +144,7 @@ Backend/src/app.js                        HTTP middleware, routes, and health ch
 Backend/src/config/socket.js              Socket.IO authentication and CORS
 Backend/src/modules/battles/services/     Battle, chain, escrow, timer, and IPFS services
 Backend/src/modules/analytics/            Event tracking and aggregate metrics
-contracts/roastellar/src/lib.rs           Soroban contract
+contracts/CinderX/src/lib.rs           Soroban contract
 render.yaml                               Backend deployment configuration
 Frontend/vercel.json                      Frontend deployment configuration
 ```

@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 
-const APP_TOKEN_ISSUER = 'roastellar-wallet-auth';
-const APP_TOKEN_AUDIENCE = 'roastellar-app';
+const APP_TOKEN_ISSUER = 'CinderX-wallet-auth';
+const APP_TOKEN_AUDIENCE = 'CinderX-app';
 const APP_TOKEN_EXPIRY = process.env.APP_AUTH_TOKEN_EXPIRY || '30d';
 
 function getJwtSecret() {

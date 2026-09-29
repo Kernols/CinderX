@@ -22,7 +22,7 @@ class UploadService {
             name,
             keyvalues: {
               created: new Date().toISOString(),
-              app: 'Roastellar',
+              app: 'CinderX',
             },
           },
         },

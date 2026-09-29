@@ -1,6 +1,6 @@
-# Getting started with Roastellar
+# Getting started with CinderX
 
-This guide starts the Roastellar testnet stack locally, explains the required environment variables, and documents the current CI/CD and Soroban deployment path.
+This guide starts the CinderX testnet stack locally, explains the required environment variables, and documents the current CI/CD and Soroban deployment path.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ PORT=3001
 NODE_ENV=development
 ALLOW_DEV_AUTH_FALLBACK=false
 
-MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/roastellar
+MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/CinderX
 
 CLERK_SECRET_KEY=sk_test_<your_clerk_secret>
 CLERK_JWT_KEY=<your_clerk_jwt_key>
@@ -132,7 +132,7 @@ Set that value as `STELLAR_CONTRACT_ID` to use the existing deployment. Deploy a
 ### Build the WASM
 
 ```powershell
-cd contracts\roastellar
+cd contracts\CinderX
 rustup target add wasm32v1-none
 cargo build --target wasm32v1-none --release
 cargo test
@@ -141,7 +141,7 @@ cargo test
 The compiled contract is written to:
 
 ```text
-contracts/roastellar/target/wasm32v1-none/release/roastellar.wasm
+contracts/CinderX/target/wasm32v1-none/release/CinderX.wasm
 ```
 
 ### Create and fund a testnet deployer
@@ -149,20 +149,20 @@ contracts/roastellar/target/wasm32v1-none/release/roastellar.wasm
 Use a dedicated testnet identity. Do not reuse a production or personal mainnet secret.
 
 ```powershell
-stellar keys generate roastellar-deployer --network testnet --fund
-stellar keys address roastellar-deployer
+stellar keys generate CinderX-deployer --network testnet --fund
+stellar keys address CinderX-deployer
 ```
 
 ### Deploy a fresh testnet instance
 
-Run this command from `contracts/roastellar`:
+Run this command from `contracts/CinderX`:
 
 ```powershell
 stellar contract deploy `
-  --wasm target/wasm32v1-none/release/roastellar.wasm `
-  --source-account roastellar-deployer `
+  --wasm target/wasm32v1-none/release/CinderX.wasm `
+  --source-account CinderX-deployer `
   --network testnet `
-  --alias roastellar
+  --alias CinderX
 ```
 
 The command returns a contract ID beginning with `C`. Update `STELLAR_CONTRACT_ID` in the backend deployment environment with that returned ID, redeploy the backend, and record the contract address in the README.
@@ -173,8 +173,8 @@ The CLI requires `--` before the contract method and its arguments:
 
 ```powershell
 stellar contract invoke `
-  --id roastellar `
-  --source-account roastellar-deployer `
+  --id CinderX `
+  --source-account CinderX-deployer `
   --network testnet `
   -- `
   get_match `

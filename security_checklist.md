@@ -1,4 +1,4 @@
-# Roastellar security checklist
+# CinderX security checklist
 
 This checklist records security controls verified against the current source tree on **23 July 2026**. It is implementation evidence for the production testnet MVP; it is not a substitute for an independent security audit or a mainnet readiness review.
 
@@ -6,7 +6,7 @@ This checklist records security controls verified against the current source tre
 
 - API and Socket.IO backend: `Backend/src/**`
 - Web client: `Frontend/src/**`
-- Soroban contract: `contracts/roastellar/src/lib.rs`
+- Soroban contract: `contracts/CinderX/src/lib.rs`
 - Deployment/configuration hygiene: repository `.gitignore` files and environment templates
 
 ## Current testnet controls

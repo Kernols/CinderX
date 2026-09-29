@@ -1,4 +1,4 @@
-# Roastellar - Soroban Smart Contract
+# CinderX - Soroban Smart Contract
 
 A fully on-chain roast battle and prediction platform on Stellar testnet.
 
@@ -13,7 +13,7 @@ CBA5M4RLMEWHZ7CNKHA3P6HZ6WGXI7C7KY5TU7YMVZJH262FOAH6BBSA
 
 ## Overview
 
-Roastellar is a Soroban smart contract that enables:
+CinderX is a Soroban smart contract that enables:
 - Two players to join a roast contest by paying entry fees
 - Spectators to vote and predict winners by staking tokens
 - Roast content stored on IPFS (only CID hashes on-chain)
@@ -116,7 +116,7 @@ rustup target add wasm32v1-none
 # Build
 cargo build --target wasm32v1-none --release
 
-# Output: target/wasm32v1-none/release/roastellar.wasm
+# Output: target/wasm32v1-none/release/CinderX.wasm
 ```
 
 ## Test
@@ -130,7 +130,7 @@ cargo test
 ```bash
 # Using Stellar CLI
 stellar contract deploy \
-  --wasm target/wasm32v1-none/release/roastellar.wasm \
+  --wasm target/wasm32v1-none/release/CinderX.wasm \
   --source <your-key> \
   --network testnet
 ```
@@ -170,9 +170,9 @@ stellar contract invoke \
 ## Project Structure
 
 ```
-Roastellar/
+CinderX/
 ├── contracts/
-│   └── roastellar/
+│   └── CinderX/
 │       ├── src/
 │       │   └── lib.rs      # Contract source (~614 lines)
 │       ├── Cargo.toml      # Dependencies
