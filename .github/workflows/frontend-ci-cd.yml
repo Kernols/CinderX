@@ -62,6 +62,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
+          if [ -z "$VERCEL_TOKEN" ]; then echo "Missing VERCEL_TOKEN. Skipping."; exit 0; fi
           for i in 1 2 3; do
             vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE" --project="$VERCEL_PROJECT" && break
             if [ "$i" -eq 3 ]; then
@@ -76,6 +77,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
+          if [ -z "$VERCEL_TOKEN" ]; then echo "Missing VERCEL_TOKEN. Skipping."; exit 0; fi
           for i in 1 2 3; do
             vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE" --project="$VERCEL_PROJECT" && break
             if [ "$i" -eq 3 ]; then
@@ -90,6 +92,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
+          if [ -z "$VERCEL_TOKEN" ]; then echo "Missing VERCEL_TOKEN. Skipping."; exit 0; fi
           for i in 1 2 3; do
             vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE" --project="$VERCEL_PROJECT" && break
             if [ "$i" -eq 3 ]; then

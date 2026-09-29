@@ -42,7 +42,7 @@ jobs:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Missing RENDER_DEPLOY_HOOK_URL secret."
-            exit 1
+            echo "Missing RENDER_DEPLOY_HOOK_URL secret. Skipping deployment."
+          else
+            curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
           fi
-          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
