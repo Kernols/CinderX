@@ -11,7 +11,24 @@
   [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
   [![Stellar](https://img.shields.io/badge/Network-Stellar_Testnet-black.svg)](https://stellar.org)
 
-  [What is CinderX?](#-what-is-cinderx) • [How it Works](#-how-it-works-user-workflow) • [System Architecture](#-system-architecture) • [File Structure](#-file-architecture) • [Getting Started](#-getting-started)
+  <br />
+
+  <table>
+    <tr>
+      <td align="center">🌐 <b>Live Frontend</b></td>
+      <td align="center">⚙️ <b>Live Backend</b></td>
+      <td align="center">📜 <b>Smart Contract</b></td>
+    </tr>
+    <tr>
+      <td align="center"><a href="https://cinderx.vercel.app/">cinderx.vercel.app</a></td>
+      <td align="center"><a href="https://cinderx.onrender.com">cinderx.onrender.com</a></td>
+      <td align="center"><a href="https://stellar.expert/explorer/testnet/contract/CBDLSUGNG3NHHHYBVRZQVCH2ZAXKSA5D4BDQKBZBXVYSKN67PLV4LWEA">Verify on Stellar.Expert ↗</a></td>
+    </tr>
+  </table>
+
+  <br />
+
+  [What is CinderX?](#-what-is-cinderx) • [Platform Showcase](#-platform-showcase--metrics) • [System Architecture](#-system-architecture) • [Smart Contracts](#-soroban-smart-contract) • [Documentation](#-documentation)
 </div>
 
 ---
@@ -25,6 +42,17 @@ Two players enter a live lobby and take turns roasting each other. Meanwhile, th
 We built CinderX with an obsession for **beginner-friendly UX**. Web3 can be intimidating, so we seamlessly abstract away the crypto complexities. Users can sign in with just an email or Google account and get an auto-generated managed wallet under the hood, while crypto-natives can still connect their own Freighter wallets directly.
 
 > **Built and maintained by [Suman Ghosh](https://github.com/SUMAN967-GHOSH) & the [Kernols](https://github.com/Kernols) Organization.**
+
+---
+
+## 📸 Platform Showcase & Metrics
+
+Monitor the global health of the arena and individual user statistics via our dedicated dashboard panels.
+
+<p align="center">
+  <img src="Frontend/Screenshots/metric_dashboard.png" width="48%" alt="Metrics Dashboard" />
+  <img src="Frontend/Screenshots/monitoring_dashboard.png" width="48%" alt="Monitoring Dashboard" />
+</p>
 
 ---
 
@@ -89,6 +117,41 @@ flowchart LR
 
 ---
 
+## 📜 Soroban Smart Contract
+
+The core payout logic of CinderX is handled completely on-chain using a highly optimized Soroban smart contract written in Rust. The smart contract acts as an escrow, holding the XLM prize pool during a battle and distributing it trustlessly when the battle concludes.
+
+<p align="center">
+  <img src="Frontend/Screenshots/transaction_activity/ccontract_creation.png" width="48%" alt="Smart Contract Deployment" />
+  <img src="Frontend/Screenshots/transaction_activity/battle_finalization1.png" width="48%" alt="Battle Payout Transaction" />
+</p>
+
+### Live Deployment Details
+Our official smart contract is currently deployed on the **Stellar Testnet**:
+*   **Contract ID:** `CBDLSUGNG3NHHHYBVRZQVCH2ZAXKSA5D4BDQKBZBXVYSKN67PLV4LWEA`
+*   **WASM Hash:** `5a2037f35ecf0d39e009ef7e5a0d8f3116a7771ae2309fcada90e856c4b83cea`
+*   **Deployer Public Key:** `GAV34WMFJZZPAIO5TO2QNPRNE3GMAGDTBJLGDMS6ERFPYG2XB5ZXZEB5`
+
+[![Verify Contract](https://img.shields.io/badge/Verify_on-Stellar.Expert-14161a?style=for-the-badge&logo=stellar)](https://stellar.expert/explorer/testnet/contract/CBDLSUGNG3NHHHYBVRZQVCH2ZAXKSA5D4BDQKBZBXVYSKN67PLV4LWEA)
+
+If you are cloning this project to run locally, you can use our existing testnet contract out-of-the-box by adding the `STELLAR_CONTRACT_ID` above to your `.env` file, or you can build and deploy your own using our provided GitHub Actions workflow.
+
+---
+
+## 📚 Documentation
+
+The repository contains extensive documentation for developers and contributors:
+
+| Guide | Description |
+|---|---|
+| 🚀 **[Getting Started](docs/GettingStarted.md)** | Local environment setup and testnet deployment instructions. |
+| ☁️ **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** | Step-by-step production deployment for Vercel, Render, and MongoDB. |
+| 🏗️ **[Architecture](docs/ARCHITECTURE.md)** | Deep dive into the system design, Web3 integration, and tech stack. |
+| 🤝 **[Contributing](CONTRIBUTING.md)** | Guidelines for branching, pull requests, and joining the community. |
+| 🔒 **[Security](docs/SECURITY.md) & [Checklist](docs/security_checklist.md)** | Vulnerability reporting and code-level security standards. |
+
+---
+
 ## 📁 File Architecture
 
 Our repository is structured as a monorepo containing everything needed to run the platform:
@@ -107,7 +170,6 @@ cinderx/
 │   ├── src/lib.rs            # Core contract logic for prize pooling
 │   └── Cargo.toml            # Rust dependencies
 ├── .github/workflows/        # CI/CD pipelines for Vercel, Render, and Tests
-├── DEPLOYMENT_GUIDE.md       # Comprehensive setup instructions
 └── README.md                 # You are here!
 ```
 
@@ -130,7 +192,7 @@ cd cinderx
 ```
 
 ### 2. Setup the Environment Variables
-Before running the app, you need to configure your API keys. Please read our comprehensive **[Deployment Guide](DEPLOYMENT_GUIDE.md)** for step-by-step instructions on setting up your `.env` files.
+Before running the app, you need to configure your API keys. Please read our comprehensive **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** for step-by-step instructions on setting up your `.env` files.
 
 ### 3. Start the Backend
 ```bash
@@ -167,3 +229,6 @@ Please ensure you adhere to our [Code of Conduct](CODE_OF_CONDUCT.md) in all int
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
 © 2026 Suman Ghosh / Kernols
+
+
+
