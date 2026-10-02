@@ -1,0 +1,32 @@
+name: Deploy Contract
+on:
+  push:
+    paths:
+      - '.github/workflows/deploy-on-github.yml'
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install wasm target
+        run: rustup target add wasm32v1-none
+      - name: Build WASM
+        working-directory: contracts/cinderx
+        run: cargo build --target wasm32v1-none --release
+      - name: Install backend deps
+        working-directory: Backend
+        run: npm ci
+      - name: Deploy Contract
+        working-directory: Backend
+        env:
+          STELLAR_BATTLE_SECRET: SDNXX5QSLMNVKECQKFKHSGESW7BPMKCIOQMEFY6SQFIDVARZOABNKEQL
+        run: node scripts/deploy-contract.js > deploy_output.txt 2>&1
+      - name: Show Output
+        working-directory: Backend
+        run: cat deploy_output.txt
