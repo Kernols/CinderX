@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 
 const { errorHandler, notFound } = require('./middlewares/error.middleware');
 const logger = require('./utils/logger');
+require('./utils/cron');
 
 const userRoutes = require('./modules/users/routes/user.routes');
 const battleRoutes = require('./modules/battles/routes/battle.routes');

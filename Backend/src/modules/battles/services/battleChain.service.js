@@ -185,7 +185,7 @@ class BattleChainService {
     throw new Error(`Soroban tx polling timed out: ${hash}`);
   }
 
-  async createMatchOnChain({ entryFee, topicCid, sourceSecret, sourcePublic }) {
+  async createMatchOnChain({ entryFee, topicCid, sourceSecret, sourcePublic, joinDeadline, roastDeadline, voteEnd }) {
     logger.info('createMatchOnChain', { contractId: CONTRACT_ID, sourcePublic, entryFee });
     const userAddress = sourcePublic || resolvePublicKey(sourceSecret, '');
     const result = await this.invokeContract({

@@ -445,11 +445,14 @@ class BattleService {
     );
     const topicCid = uploadedTopicCid || `local-topic-${matchId}`;
 
-    const entryTxHash = await escrowService.transferFromUserToEscrow({
+    let entryTxHash = 'on-chain-escrow';
+      if (process.env.ONCHAIN_ESCROW !== 'true') {
+        entryTxHash = await escrowService.transferFromUserToEscrow({
       user,
       amountXlm: fee,
       memo: `battle_entry_${matchId}`,
     });
+      }
 
     let chainCreate = null;
     try {
@@ -1109,6 +1112,9 @@ class BattleService {
   }
 
   async refundBattleEscrowOnCancel(battle) {
+    if (process.env.ONCHAIN_ESCROW === 'true') {
+      return ['on-chain-refund'];
+    }
     const refundTxHashes = [];
 
     if (battle.finance?.entryTxPlayer1 && battle.player1Wallet) {
@@ -1406,3 +1412,4 @@ class BattleService {
 }
 
 module.exports = new BattleService();
+
