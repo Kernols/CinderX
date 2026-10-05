@@ -13,8 +13,8 @@ export default function UsersPage() {
     try {
       const token = await getToken({ skipCache: true })
       if (!token) return
-      const res = await fetch(\`\${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/users\`, {
-        headers: { Authorization: \`Bearer \${token}\` }
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` }
       })
       const json = await res.json()
       if (json.success) setUsers(json.data.users)
@@ -28,9 +28,9 @@ export default function UsersPage() {
   const toggleBan = async (id: string, currentlyBanned: boolean) => {
     try {
       const token = await getToken({ skipCache: true })
-      await fetch(\`\${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/users/\${id}\`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/users/${id}`, {
         method: 'PATCH',
-        headers: { Authorization: \`Bearer \${token}\`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ isBanned: !currentlyBanned })
       })
       toast.success(currentlyBanned ? 'User unbanned' : 'User banned')
@@ -58,7 +58,7 @@ export default function UsersPage() {
               <tr key={i} className="hover:bg-white/5">
                 <td className="px-6 py-4">{u.username || u.email}</td>
                 <td className="px-6 py-4">
-                  <span className={\`rounded px-2 py-1 text-xs font-bold \${u.role === 'admin' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-500/20 text-slate-400'}\`}>
+                  <span className={`rounded px-2 py-1 text-xs font-bold ${u.role === 'admin' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-500/20 text-slate-400'}`}>
                     {u.role.toUpperCase()}
                   </span>
                 </td>
@@ -78,3 +78,4 @@ export default function UsersPage() {
     </div>
   )
 }
+

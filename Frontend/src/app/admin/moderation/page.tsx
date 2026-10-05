@@ -13,8 +13,8 @@ export default function ModerationPage() {
     try {
       const token = await getToken({ skipCache: true })
       if (!token) return
-      const res = await fetch(\`\${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/reports?status=PENDING\`, {
-        headers: { Authorization: \`Bearer \${token}\` }
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/reports?status=PENDING`, {
+        headers: { Authorization: `Bearer ${token}` }
       })
       const json = await res.json()
       if (json.success) setReports(json.data.reports)
@@ -28,12 +28,12 @@ export default function ModerationPage() {
   const handleResolve = async (id: string, status: 'REVIEWED' | 'DISMISSED') => {
     try {
       const token = await getToken({ skipCache: true })
-      await fetch(\`\${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/reports/\${id}\`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/reports/${id}`, {
         method: 'PATCH',
-        headers: { Authorization: \`Bearer \${token}\`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
       })
-      toast.success(\`Report \${status.toLowerCase()} successfully\`)
+      toast.success(`Report ${status.toLowerCase()} successfully`)
       fetchReports()
     } catch (e) {
       toast.error('Action failed')
@@ -65,3 +65,4 @@ export default function ModerationPage() {
     </div>
   )
 }
+
