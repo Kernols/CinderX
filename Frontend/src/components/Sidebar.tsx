@@ -24,6 +24,8 @@ const mobileNavItems = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { user } = useUser()
+  const isAdmin = user?.publicMetadata?.role === 'admin'
 
   return (
     <>
@@ -103,3 +105,4 @@ export function Sidebar() {
     </>
   )
 }
+

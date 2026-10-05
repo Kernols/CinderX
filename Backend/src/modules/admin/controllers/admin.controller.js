@@ -1,97 +1,135 @@
-const Analytics = require('../models/analytics.model');
-const User = require('../../modules/users/models/user.model');
-const { Battle } = require('../../modules/battles/models/battle.model');
-const ApiResponse = require('../../utils/apiResponse');
-const logger = require('../../utils/logger');
+const User = require('../../users/models/user.model');
+const Battle = require('../../battles/models/battle.model');
+const AuditLog = require('../models/auditLog.model');
+const AdminConfig = require('../models/adminConfig.model');
+const ApiResponse = require('../../../utils/apiResponse');
 
-exports.getMetrics = async (req, res) => {
+// Overview Stats
+exports.getOverview = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const [
-      totalUsers,
-      dailyActiveUsers,
-      totalBattles,
-      activeBattles,
-      votesToday,
-      predictionsToday,
-    ] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ lastLoginAt: { $gte: today } }),
-      Battle.countDocuments(),
-      Battle.countDocuments({ status: 'active' }),
-      Analytics.countDocuments({
-        eventType: 'vote_cast',
-        timestamp: { $gte: today },
-      }),
-      Analytics.countDocuments({
-        eventType: 'prediction_placed',
-        timestamp: { $gte: today },
-      }),
+    const totalUsers = await User.countDocuments();
+    const activeBattles = await Battle.countDocuments({ status: 'active' });
+    const totalBattles = await Battle.countDocuments();
+    
+    // Aggregation for volume and fees (assuming finance.entryTxPlayer1 means paid entry)
+    const volumeData = await Battle.aggregate([
+      { $match: { entryFee: { $exists: true } } },
+      { $group: { _id: null, totalVolume: { $sum: { $multiply: ['$entryFee', 2] } } } }
     ]);
+    const totalVolume = volumeData[0]?.totalVolume || 0;
+    const feesEarned = totalVolume * 0.025; // Example 2.5%
 
-    return ApiResponse.success(res, {
+    return ApiResponse.success(res, 'Overview retrieved', {
       totalUsers,
-      dailyActiveUsers,
-      totalBattles,
       activeBattles,
-      votesToday,
-      predictionsToday,
+      totalBattles,
+      totalVolume,
+      feesEarned
     });
   } catch (error) {
-    logger.error('Get metrics error:', error);
     return ApiResponse.error(res, error.message);
   }
 };
 
-exports.getAllUsers = async (req, res) => {
+// Users Management
+exports.getUsers = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search = '' } = req.query;
-    const result = await UserService.getAllUsers(parseInt(page), parseInt(limit), search);
-    return ApiResponse.success(res, result);
+    const { search, role, isBanned, page = 1, limit = 20 } = req.query;
+    const query = {};
+    if (search) {
+      query.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    if (role) query.role = role;
+    if (isBanned !== undefined) query.isBanned = isBanned === 'true';
+
+    const users = await User.find(query)
+      .select('-walletEncryptedSecret')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+    const total = await User.countDocuments(query);
+
+    return ApiResponse.success(res, 'Users retrieved', { users, total, page: Number(page) });
   } catch (error) {
-    logger.error('Get all users error:', error);
     return ApiResponse.error(res, error.message);
   }
 };
 
-exports.getAllBattles = async (req, res) => {
+exports.updateUserStatus = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status = null } = req.query;
-    const { battles } = await BattleService.getAllBattles(
-      parseInt(page),
-      parseInt(limit),
-      status
+    const { userId } = req.params;
+    const { isBanned, role } = req.body;
+    
+    const user = await User.findById(userId);
+    if (!user) return ApiResponse.notFound(res, 'User not found');
+
+    if (isBanned !== undefined) user.isBanned = isBanned;
+    if (role) user.role = role;
+    
+    await user.save();
+
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: isBanned ? 'BAN_USER' : (role ? 'SET_ROLE' : 'UNBAN_USER'),
+      targetId: String(user._id),
+      details: { isBanned, role },
+      ipAddress: req.ip
+    });
+
+    return ApiResponse.success(res, 'User updated', { user });
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
+
+// Config Management
+exports.getConfig = async (req, res) => {
+  try {
+    const configs = await AdminConfig.find();
+    return ApiResponse.success(res, 'Config retrieved', { configs });
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
+
+exports.updateConfig = async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    const config = await AdminConfig.findOneAndUpdate(
+      { key },
+      { value, updatedBy: req.user._id, updatedAt: new Date() },
+      { upsert: true, new: true }
     );
-    return ApiResponse.success(res, battles);
+
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'UPDATE_CONFIG',
+      targetId: key,
+      details: { newValue: value },
+      ipAddress: req.ip
+    });
+
+    return ApiResponse.success(res, 'Config updated', { config });
   } catch (error) {
-    logger.error('Get all battles error:', error);
     return ApiResponse.error(res, error.message);
   }
 };
 
-exports.banUser = async (req, res) => {
+// Audit Logs
+exports.getAuditLogs = async (req, res) => {
   try {
-    const { userId } = req.params;
-    await UserService.banUser(userId);
-    return ApiResponse.success(res, null, 'User banned');
+    const { page = 1, limit = 50 } = req.query;
+    const logs = await AuditLog.find()
+      .populate('adminId', 'username email')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+    const total = await AuditLog.countDocuments();
+    return ApiResponse.success(res, 'Logs retrieved', { logs, total });
   } catch (error) {
-    logger.error('Ban user error:', error);
     return ApiResponse.error(res, error.message);
   }
 };
-
-exports.unbanUser = async (req, res) => {
-  try {
-    const { userId } = req.params;
-    await UserService.unbanUser(userId);
-    return ApiResponse.success(res, null, 'User unbanned');
-  } catch (error) {
-    logger.error('Unban user error:', error);
-    return ApiResponse.error(res, error.message);
-  }
-};
-
-const UserService = require('../../modules/users/services/user.service');
-const BattleService = require('../../modules/battles/services/battle.service');
