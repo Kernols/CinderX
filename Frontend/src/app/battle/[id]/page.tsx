@@ -48,6 +48,8 @@ export default function BattleRoomPage() {
   const [timer, setTimer] = useState<TimerState>({ phase: null, remaining: 0 })
   const [resultWinner, setResultWinner] = useState<User | null>(null)
   const [showResult, setShowResult] = useState(false)
+  const [chatMessages, setChatMessages] = useState<any[]>([])
+  const [chatInput, setChatInput] = useState('')
   const [spectators, setSpectators] = useState(0)
   const [me, setMe] = useState<User | null>(null)
   const [activity, setActivity] = useState<string[]>([])
@@ -726,3 +728,4 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     </div>
   )
 }
+
