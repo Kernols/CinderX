@@ -2,30 +2,33 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useUser } from '@clerk/nextjs'
 import { motion } from 'framer-motion'
 import { LayoutDashboard, Trophy, User, Wallet, Waves, Swords } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/BrandLogo'
 
-const desktopNavItems = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', hint: 'Arena hub' },
-  { href: '/battles', icon: Swords, label: 'Battles', hint: 'Live matches' },
-  { href: '/leaderboard', icon: Trophy, label: 'Leaderboard', hint: 'Top roasters' },
-  { href: '/wallet', icon: Wallet, label: 'Wallet', hint: 'Stellar vault' },
-  { href: '/profile', icon: User, label: 'Profile', hint: 'Badges and history' },
-]
-
-const mobileNavItems = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/battles', icon: Swords, label: 'Battles' },
-  { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
-  { href: '/profile', icon: User, label: 'Profile' },
-]
-
 export function Sidebar() {
   const pathname = usePathname()
   const { user } = useUser()
   const isAdmin = user?.publicMetadata?.role === 'admin'
+
+  const desktopNavItems = [
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', hint: 'Arena hub' },
+    { href: '/battles', icon: Swords, label: 'Battles', hint: 'Live matches' },
+    { href: '/leaderboard', icon: Trophy, label: 'Leaderboard', hint: 'Top roasters' },
+    { href: '/wallet', icon: Wallet, label: 'Wallet', hint: 'Stellar vault' },
+    { href: '/profile', icon: User, label: 'Profile', hint: 'Badges and history' },
+    ...(isAdmin ? [{ href: '/admin', icon: Trophy, label: 'Admin', hint: 'Admin Console' }] : []),
+  ]
+
+  const mobileNavItems = [
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { href: '/battles', icon: Swords, label: 'Battles' },
+    { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
+    { href: '/profile', icon: User, label: 'Profile' },
+    ...(isAdmin ? [{ href: '/admin', icon: Trophy, label: 'Admin' }] : []),
+  ]
 
   return (
     <>
@@ -34,7 +37,6 @@ export function Sidebar() {
             <BrandLogo size={48} className="rounded-2xl border-blue-400/20 bg-blue-500/10" />
             <div>
               <p className="font-orbitron text-lg font-bold text-white">CinderX</p>
-              {/* <p className="text-xs uppercase tracking-[0.28em] text-white/35">Premium Access</p> */}
             </div>
           </div>
 
@@ -69,15 +71,6 @@ export function Sidebar() {
             })}
           </nav>
         </div>
-
-        {/* <div className="mt-4 rounded-[28px] border border-amber-300/12 bg-amber-300/10 p-5">
-          <div className="flex items-center gap-2 text-amber-200">
-            <Waves className="h-4 w-4" />
-            <span className="text-xs uppercase tracking-[0.28em]">Reward Loop</span>
-          </div>
-          <p className="mt-3 font-orbitron text-xl text-white">Daily challenge resets in 8h</p>
-          <p className="mt-2 text-sm text-white/55">Keep your streak alive to unlock bonus testnet XLM and featured placement.</p>
-        </div> */}
       </aside>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-slate-950/95 px-2 pt-2 backdrop-blur-xl lg:hidden">

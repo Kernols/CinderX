@@ -16,8 +16,8 @@ export default function AdminOverview() {
         const token = await getToken({ skipCache: true })
         if (!token) return
         // Minimal fetch directly for now
-        const res = await fetch(\`\${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/overview\`, {
-          headers: { Authorization: \`Bearer \${token}\` }
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/admin/overview`, {
+          headers: { Authorization: `Bearer ${token}` }
         })
         const json = await res.json()
         if (json.success) setStats(json.data)
@@ -30,10 +30,10 @@ export default function AdminOverview() {
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Total Users" value={stats.totalUsers.toString()} icon={<Users />} />
-        <StatCard title="Active Battles" value={stats.activeBattles.toString()} icon={<Activity />} />
-        <StatCard title="Total Battles" value={stats.totalBattles.toString()} icon={<Swords />} />
-        <StatCard title="Platform Fees (USDC)" value={stats.feesEarned.toFixed(2)} icon={<Coins />} />
+        <StatCard label="Total Users" value={stats.totalUsers.toString()} icon={Users} />
+        <StatCard label="Active Battles" value={stats.activeBattles.toString()} icon={Activity} />
+        <StatCard label="Total Battles" value={stats.totalBattles.toString()} icon={Swords} />
+        <StatCard label="Platform Fees (USDC)" value={stats.feesEarned.toFixed(2)} icon={Coins} />
       </div>
 
       <div className="mt-10 grid gap-6 md:grid-cols-2">
