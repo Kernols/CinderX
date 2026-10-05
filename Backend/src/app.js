@@ -12,6 +12,7 @@ require('./utils/cron');
 
 const userRoutes = require('./modules/users/routes/user.routes');
 const adminRoutes = require('./modules/admin/routes/admin.routes');
+const metricsRoutes = require('./modules/admin/routes/metrics.routes');
 const battleRoutes = require('./modules/battles/routes/battle.routes');
 const predictionRoutes = require('./modules/predictions/routes/prediction.routes');
 const leaderboardRoutes = require('./modules/leaderboard/routes/leaderboard.routes');
@@ -108,6 +109,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/metrics', metricsRoutes);
 app.use('/api/battles', battleRoutes);
 app.use('/api/predictions', predictionRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
@@ -118,4 +120,5 @@ app.use(notFound);
 app.use(errorHandler);
 
 module.exports = app;
+
 
