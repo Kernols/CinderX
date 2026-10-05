@@ -35,3 +35,7 @@ identity/
 # Un-ignore contracts lock file
 .vercel
 .env*
+
+Frontend/patch_ui.js
+WEEK1_PLAN.md
+V2_IMPLEMENTATION.md
