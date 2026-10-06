@@ -188,12 +188,21 @@ class BattleChainService {
   async createMatchOnChain({ entryFee, topicCid, sourceSecret, sourcePublic, joinDeadline, roastDeadline, voteEnd }) {
     logger.info('createMatchOnChain', { contractId: CONTRACT_ID, sourcePublic, entryFee });
     const userAddress = sourcePublic || resolvePublicKey(sourceSecret, '');
+    
+    // In JS we deal with dates/milliseconds, contract expects Unix timestamp in seconds
+    const jd = Math.floor(new Date(joinDeadline).getTime() / 1000);
+    const rd = Math.floor(new Date(roastDeadline).getTime() / 1000);
+    const ve = Math.floor(new Date(voteEnd).getTime() / 1000);
+
     const result = await this.invokeContract({
       method: process.env.STELLAR_CREATE_MATCH_FN || 'create_match',
       args: [
         StellarSdk.nativeToScVal(Number(entryFee || 0), { type: 'i128' }),
         StellarSdk.nativeToScVal(topicCid || '', { type: 'string' }),
         StellarSdk.nativeToScVal(userAddress, { type: 'address' }),
+        StellarSdk.nativeToScVal(jd, { type: 'u64' }),
+        StellarSdk.nativeToScVal(rd, { type: 'u64' }),
+        StellarSdk.nativeToScVal(ve, { type: 'u64' }),
       ],
       sourceSecret,
       sourcePublic: userAddress,

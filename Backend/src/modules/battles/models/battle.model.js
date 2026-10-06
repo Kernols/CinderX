@@ -96,6 +96,15 @@ const battleSchema = new mongoose.Schema({
   endedAt: {
     type: Date,
   },
+  joinDeadline: {
+    type: Date,
+  },
+  roastDeadline: {
+    type: Date,
+  },
+  voteEnd: {
+    type: Date,
+  },
   txHash: {
     type: String,
     default: '',
