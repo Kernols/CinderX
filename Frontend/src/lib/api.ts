@@ -543,6 +543,12 @@ async function getAndNormalize<TOutput, TInput = TOutput>(
 }
 
 export const apiRoutes = {
+  tournaments: {
+    list: (token?: string) => getAndNormalize(api.get('/api/tournaments', authConfig(token)), (data) => data)
+  },
+  notifications: {
+    list: (token?: string) => getAndNormalize(api.get('/api/notifications', authConfig(token)), (data) => data)
+  },
   auth: {
     walletChallenge: (payload: { walletAddress: string; username?: string }) =>
       getAndNormalize(
