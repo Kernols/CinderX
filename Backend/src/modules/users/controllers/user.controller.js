@@ -289,3 +289,29 @@ exports.getUserById = async (req, res) => {
     return ApiResponse.error(res, error.message);
   }
 };
+
+
+exports.followUser = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    if (targetId === req.user._id.toString()) return res.status(400).json({ error: 'Cannot follow yourself' });
+
+    const targetUser = await User.findById(targetId);
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+    const isFollowing = req.user.following.includes(targetId);
+    if (isFollowing) {
+      req.user.following = req.user.following.filter(id => id.toString() !== targetId);
+      targetUser.followers = targetUser.followers.filter(id => id.toString() !== req.user._id.toString());
+    } else {
+      req.user.following.push(targetId);
+      targetUser.followers.push(req.user._id);
+    }
+    await req.user.save();
+    await targetUser.save();
+
+    res.json({ success: true, isFollowing: !isFollowing });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
