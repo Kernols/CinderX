@@ -15,3 +15,4 @@ soroban-sdk = { version = "=27.0.0", features = ["testutils"] }
 [profile.release]
 opt-level = "z"
 lto = true
+overflow-checks = true
