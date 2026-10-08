@@ -8,12 +8,14 @@ const serviceAccount = {
   client_email: process.env.FIREBASE_CLIENT_EMAIL,
 };
 
+const logger = require('../utils/logger');
+
 const initializeFirebase = () => {
   if (admin.apps.length === 0) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
-    console.log('Firebase Admin initialized');
+    logger.info('Firebase Admin initialized');
   }
   return admin;
 };

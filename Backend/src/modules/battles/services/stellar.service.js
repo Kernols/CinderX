@@ -12,13 +12,15 @@ class StellarService {
 
   encryptSecret(secret) {
     const CryptoJS = require('crypto-js');
-    const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-32-chars-abcdef12';
+    const encryptionKey = process.env.ENCRYPTION_KEY;
+    if (!encryptionKey) throw new Error('ENCRYPTION_KEY must be set in production');
     return CryptoJS.AES.encrypt(secret, encryptionKey).toString();
   }
 
   decryptSecret(encryptedSecret) {
     const CryptoJS = require('crypto-js');
-    const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-32-chars-abcdef12';
+    const encryptionKey = process.env.ENCRYPTION_KEY;
+    if (!encryptionKey) throw new Error('ENCRYPTION_KEY must be set in production');
     const bytes = CryptoJS.AES.decrypt(encryptedSecret, encryptionKey);
     return bytes.toString(CryptoJS.enc.Utf8);
   }
