@@ -24,6 +24,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return <PageLoader />
   }
 
+  return (
     <div className="flex min-h-screen bg-black text-slate-200">
       <Sidebar />
       <main className="flex-1 overflow-y-auto pl-20 pt-20">
