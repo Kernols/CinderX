@@ -74,6 +74,14 @@ const limiter = rateLimit({
 
 app.use('/api', limiter);
 
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Welcome to the CinderX API',
+    docs: '/health'
+  });
+});
+
 app.get('/health', (req, res) => {
   const dbStateByCode = {
     0: 'disconnected',
