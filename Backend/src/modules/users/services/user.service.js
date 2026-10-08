@@ -1,5 +1,5 @@
-const User = require('../users/models/user.model');
-const { BADGES, XP_REWARD_WIN, XP_REWARD_LOSE, RANK_POINTS_WIN, RANK_POINTS_LOSE } = require('../../utils/constants');
+const User = require('../models/user.model');
+const { BADGES, XP_REWARD_WIN, XP_REWARD_LOSE, RANK_POINTS_WIN, RANK_POINTS_LOSE } = require('../../../utils/constants');
 
 class UserService {
   async updateProfile(userId, updates) {

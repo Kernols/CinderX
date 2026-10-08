@@ -1,9 +1,9 @@
-const User = require('../users/models/user.model');
-const { verifyGoogleToken } = require('../../config/firebase');
-const stellarService = require('../battles/services/stellar.service');
-const { EVENT_TYPES } = require('../../utils/constants');
-const Analytics = require('../analytics/models/analytics.model');
-const logger = require('../../utils/logger');
+const User = require('../../users/models/user.model');
+const { verifyGoogleToken } = require('../../../config/firebase');
+const stellarService = require('../../battles/services/stellar.service');
+const { EVENT_TYPES } = require('../../../utils/constants');
+const Analytics = require('../../analytics/models/analytics.model');
+const logger = require('../../../utils/logger');
 
 class AuthService {
   async login(idToken) {

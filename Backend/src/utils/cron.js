@@ -1,7 +1,7 @@
 const schedule = require('node-schedule');
 const logger = require('./logger');
 const AdminConfig = require('../modules/admin/models/adminConfig.model');
-const { getIO } = require('../../config/socket');
+const { getIO } = require('../config/socket');
 
 const TOPICS = [
   "Roast my coding skills",

@@ -1,5 +1,5 @@
-const { StellarSdk, server, rpcServer, CONTRACT_ID, NETWORK_PASSPHRASE } = require('../../config/stellar');
-const logger = require('../../utils/logger');
+const { StellarSdk, server, rpcServer, CONTRACT_ID, NETWORK_PASSPHRASE } = require('../../../config/stellar');
+const logger = require('../../../utils/logger');
 
 class StellarService {
   createWallet() {
