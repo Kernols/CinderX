@@ -1,20 +1,43 @@
+const winston = require('winston');
+const Sentry = require('@sentry/node');
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    tracesSampleRate: 1.0,
+  });
+}
+
+const winstonLogger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console()
+  ],
+});
+
 const logger = {
   info: (message, meta = {}) => {
-    console.log(`[INFO] ${new Date().toISOString()} -`, message, meta);
+    winstonLogger.info(message, meta);
   },
 
   error: (message, error = null) => {
-    console.error(`[ERROR] ${new Date().toISOString()} -`, message, error);
+    winstonLogger.error(message, { error: error instanceof Error ? error.message : error, stack: error?.stack });
+    if (process.env.SENTRY_DSN) {
+       if (error instanceof Error) Sentry.captureException(error);
+       else Sentry.captureMessage(message);
+    }
   },
 
   warn: (message, meta = {}) => {
-    console.warn(`[WARN] ${new Date().toISOString()} -`, message, meta);
+    winstonLogger.warn(message, meta);
   },
 
   debug: (message, meta = {}) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.debug(`[DEBUG] ${new Date().toISOString()} -`, message, meta);
-    }
+    winstonLogger.debug(message, meta);
   },
 };
 

@@ -15,4 +15,16 @@ router.post('/config', adminController.updateConfig);
 
 router.get('/audit-logs', adminController.getAuditLogs);
 
+// Battles management
+router.post('/battles/:matchId/cancel', adminController.cancelBattle);
+router.post('/battles/:matchId/finalize', adminController.finalizeBattle);
+router.post('/battles/:matchId/refund', adminController.refundBattle);
+
+// Treasury
+router.get('/treasury', adminController.getTreasury);
+
+// Moderation
+router.get('/reports', adminController.getReports);
+router.patch('/reports/:reportId', adminController.resolveReport);
+
 module.exports = router;

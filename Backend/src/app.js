@@ -12,6 +12,7 @@ require('./utils/cron');
 
 const userRoutes = require('./modules/users/routes/user.routes');
 const adminRoutes = require('./modules/admin/routes/admin.routes');
+const reportRoutes = require('./modules/admin/routes/report.routes');
 const notificationRoutes = require('./modules/notifications/routes/notification.routes');
 const tournamentRoutes = require('./modules/tournaments/routes/tournament.routes');
 const metricsRoutes = require('./modules/admin/routes/metrics.routes');
@@ -111,6 +112,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/tournaments', tournamentRoutes);
 app.use('/metrics', metricsRoutes);

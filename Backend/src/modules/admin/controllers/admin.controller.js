@@ -133,3 +133,144 @@ exports.getAuditLogs = async (req, res) => {
     return ApiResponse.error(res, error.message);
   }
 };
+
+// Battles Management
+exports.cancelBattle = async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    const battleService = require('../../battles/services/battle.service');
+    const battle = await battleService.getBattleByMatchId(matchId);
+    
+    if (!battle) return ApiResponse.notFound(res, 'Battle not found');
+
+    if (battle.status !== 'open') {
+        return ApiResponse.error(res, 'Only open battles can be cancelled via admin directly');
+    }
+    
+    battle.status = 'cancelled';
+    battle.endedAt = new Date();
+    await battle.save();
+
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'CANCEL_BATTLE',
+      targetId: matchId,
+      details: {},
+      ipAddress: req.ip
+    });
+
+    return ApiResponse.success(res, 'Battle cancelled', { battle });
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
+
+exports.finalizeBattle = async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    const battleService = require('../../battles/services/battle.service');
+    await battleService.finalizeBattle({ matchId, actorUserId: req.user._id, internalCall: true });
+    
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'FINALIZE_BATTLE',
+      targetId: matchId,
+      details: {},
+      ipAddress: req.ip
+    });
+
+    return ApiResponse.success(res, 'Battle finalized');
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
+
+exports.refundBattle = async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    const battleService = require('../../battles/services/battle.service');
+    const BattleModel = require('../../battles/models/battle.model');
+    const battle = await BattleModel.findOne({ matchId });
+    if (!battle) return ApiResponse.notFound(res, 'Battle not found');
+    
+    const hashes = await battleService.refundBattleEscrowOnCancel(battle);
+    
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'REFUND_BATTLE',
+      targetId: matchId,
+      details: { hashes },
+      ipAddress: req.ip
+    });
+
+    return ApiResponse.success(res, 'Battle refunded', { hashes });
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
+
+// Treasury
+exports.getTreasury = async (req, res) => {
+  try {
+    const chainService = require('../../battles/services/battleChain.service');
+    const escrowPublic = chainService.getEscrowPublic();
+    
+    return ApiResponse.success(res, 'Treasury retrieved', {
+       contractId: process.env.STELLAR_CONTRACT_ID,
+       escrowPublic,
+       network: process.env.STELLAR_NETWORK
+    });
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
+
+// Moderation
+exports.getReports = async (req, res) => {
+  try {
+    const Report = require('../models/report.model');
+    const { status, page = 1, limit = 20 } = req.query;
+    const query = {};
+    if (status) query.status = status;
+    
+    const reports = await Report.find(query)
+      .populate('reporterId', 'username email')
+      .populate('resolvedBy', 'username email')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+    const total = await Report.countDocuments(query);
+    
+    return ApiResponse.success(res, 'Reports retrieved', { reports, total, page: Number(page) });
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
+
+exports.resolveReport = async (req, res) => {
+  try {
+    const Report = require('../models/report.model');
+    const { reportId } = req.params;
+    const { status } = req.body;
+    
+    const report = await Report.findById(reportId);
+    if (!report) return ApiResponse.notFound(res, 'Report not found');
+    
+    report.status = status;
+    report.resolvedBy = req.user._id;
+    report.resolvedAt = new Date();
+    await report.save();
+    
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'RESOLVE_REPORT',
+      targetId: reportId,
+      details: { status },
+      ipAddress: req.ip
+    });
+
+    return ApiResponse.success(res, 'Report resolved', { report });
+  } catch (error) {
+    return ApiResponse.error(res, error.message);
+  }
+};
