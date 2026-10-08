@@ -17,6 +17,8 @@
   "license": "MIT",
   "dependencies": {
     "@clerk/clerk-sdk-node": "^4.0.0",
+    "@sentry/node": "^11.6.0",
+    "@sentry/profiling-node": "^11.6.0",
     "@stellar/stellar-sdk": "^16.1.0",
     "axios": "^1.18.0",
     "cors": "^2.8.5",
@@ -32,6 +34,7 @@
     "node-schedule": "^2.1.1",
     "socket.io": "^4.7.2",
     "stellar-sdk": "^11.0.0",
+    "winston": "^3.19.0",
     "zod": "^3.22.4"
   },
   "overrides": {
