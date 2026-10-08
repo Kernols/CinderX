@@ -34,3 +34,18 @@ pub fn payout(e: &Env, match_id: u32, recipient: &Address, amount: i128) {
     let topics = (symbol_short!("payout"), match_id, recipient.clone());
     e.events().publish(topics, amount);
 }
+
+pub fn match_canceled(e: &Env, match_id: u32) {
+    let topics = (symbol_short!("canceled"), match_id);
+    e.events().publish(topics, ());
+}
+
+pub fn refunded(e: &Env, match_id: u32, player: &Address, amount: i128) {
+    let topics = (symbol_short!("refunded"), match_id, player.clone());
+    e.events().publish(topics, amount);
+}
+
+pub fn prediction_claimed(e: &Env, match_id: u32, predictor: &Address, amount: i128) {
+    let topics = (Symbol::new(e, "claimed"), match_id, predictor.clone());
+    e.events().publish(topics, amount);
+}

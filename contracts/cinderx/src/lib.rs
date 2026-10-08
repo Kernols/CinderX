@@ -27,6 +27,10 @@ pub trait CinderXTrait {
     fn vote(e: Env, match_id: u32, selected_player: Address, voter: Address) -> Result<(), Error>;
     fn predict(e: Env, match_id: u32, selected_player: Address, amount: i128, predictor: Address) -> Result<(), Error>;
     fn finalize_match(e: Env, match_id: u32) -> Result<(), Error>;
+    fn claim_prediction(e: Env, match_id: u32, predictor: Address) -> Result<(), Error>;
+    fn refund_draw(e: Env, match_id: u32, player: Address) -> Result<(), Error>;
+    fn cancel_match(e: Env, match_id: u32) -> Result<(), Error>;
+    fn refund_expired(e: Env, match_id: u32, player: Address) -> Result<(), Error>;
 }
 
 #[contract]
@@ -403,6 +407,113 @@ impl CinderXTrait for CinderX {
 
         events::finalized(&e, match_id, &Some(winner.clone()));
         events::payout(&e, match_id, &winner, winner_payout);
+
+        Ok(())
+    }
+
+    fn claim_prediction(e: Env, match_id: u32, predictor: Address) -> Result<(), Error> {
+        predictor.require_auth();
+        extend_instance_ttl(&e);
+
+        let key = DataKey::Match(match_id);
+        let match_data = e.storage().persistent().get::<_, Match>(&key).ok_or(Error::MatchNotFound)?;
+
+        if match_data.status != MatchStatus::Ended {
+            return Err(Error::MatchNotEnded);
+        }
+
+        let winner = match_data.winner.ok_or(Error::MatchNotEnded)?;
+
+        let prediction_key = DataKey::Prediction(match_id, predictor.clone());
+        let mut prediction = e.storage().persistent().get::<_, Prediction>(&prediction_key).ok_or(Error::NotParticipant)?;
+
+        if prediction.claimed {
+            return Err(Error::PredictionAlreadyClaimed);
+        }
+
+        if prediction.selected_player != winner {
+            return Err(Error::InvalidPlayerSelected); 
+        }
+
+        prediction.claimed = true;
+        e.storage().persistent().set(&prediction_key, &prediction);
+        e.storage().persistent().extend_ttl(&prediction_key, PERSISTENT_BUMP_AMOUNT, PERSISTENT_BUMP_AMOUNT);
+
+        // Simple 1.5x payout for prediction winners
+        let payout_amount = (prediction.amount * 15) / 10;
+        
+        let token_addr: Address = e.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&e, &token_addr);
+        token_client.transfer(&e.current_contract_address(), &predictor, &payout_amount);
+
+        events::prediction_claimed(&e, match_id, &predictor, payout_amount);
+
+        Ok(())
+    }
+
+    fn refund_draw(e: Env, match_id: u32, player: Address) -> Result<(), Error> {
+        extend_instance_ttl(&e);
+        let key = DataKey::Match(match_id);
+        let match_data = e.storage().persistent().get::<_, Match>(&key).ok_or(Error::MatchNotFound)?;
+
+        if match_data.status != MatchStatus::Draw {
+            return Err(Error::MatchNotDraw);
+        }
+
+        let join_key = DataKey::HasJoined(player.clone(), match_id);
+        if !e.storage().persistent().has(&join_key) {
+             return Err(Error::NotParticipant); 
+        }
+
+        e.storage().persistent().remove(&join_key);
+
+        let token_addr: Address = e.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&e, &token_addr);
+        token_client.transfer(&e.current_contract_address(), &player, &match_data.entry_fee);
+
+        events::refunded(&e, match_id, &player, match_data.entry_fee);
+
+        Ok(())
+    }
+
+    fn cancel_match(e: Env, match_id: u32) -> Result<(), Error> {
+        extend_instance_ttl(&e);
+        let key = DataKey::Match(match_id);
+        let mut match_data = e.storage().persistent().get::<_, Match>(&key).ok_or(Error::MatchNotFound)?;
+
+        if match_data.status != MatchStatus::Open {
+            return Err(Error::MatchNotOpen);
+        }
+        
+        match_data.status = MatchStatus::Canceled;
+        e.storage().persistent().set(&key, &match_data);
+
+        events::match_canceled(&e, match_id);
+
+        Ok(())
+    }
+
+    fn refund_expired(e: Env, match_id: u32, player: Address) -> Result<(), Error> {
+        extend_instance_ttl(&e);
+        let key = DataKey::Match(match_id);
+        let match_data = e.storage().persistent().get::<_, Match>(&key).ok_or(Error::MatchNotFound)?;
+
+        if match_data.status != MatchStatus::Canceled {
+             return Err(Error::MatchNotEnded); 
+        }
+
+        let join_key = DataKey::HasJoined(player.clone(), match_id);
+        if !e.storage().persistent().has(&join_key) {
+             return Err(Error::NotParticipant);
+        }
+
+        e.storage().persistent().remove(&join_key);
+
+        let token_addr: Address = e.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&e, &token_addr);
+        token_client.transfer(&e.current_contract_address(), &player, &match_data.entry_fee);
+
+        events::refunded(&e, match_id, &player, match_data.entry_fee);
 
         Ok(())
     }
