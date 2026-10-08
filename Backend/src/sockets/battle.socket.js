@@ -126,6 +126,22 @@ function registerBattleSocketHandlers(io, socket) {
     }
   });
 
+  socket.on('chat_message', async ({ matchId, message }) => {
+    const numericMatchId = Number(matchId);
+    if (!Number.isFinite(numericMatchId) || numericMatchId <= 0) {
+      return;
+    }
+    const safeMessage = typeof message === 'string' ? message.trim().substring(0, 300) : '';
+    if (!safeMessage) return;
+
+    io.to(`battle_${numericMatchId}`).emit('chat_message', {
+      matchId: numericMatchId,
+      user: userPayload(user),
+      message: safeMessage,
+      timestamp: new Date(),
+    });
+  });
+
   socket.on('disconnect', async () => {
     const rooms = Array.from(joinedBattleRooms);
     for (const room of rooms) {

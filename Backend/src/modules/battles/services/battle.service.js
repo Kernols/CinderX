@@ -463,17 +463,19 @@ class BattleService {
         sourcePublic: creatorWalletPublic,
       });
     } catch (error) {
-      try {
-        await escrowService.transferFromEscrow({
-          toPublicKey: creatorWalletPublic,
-          amountXlm: fee,
-          memo: `entry_refund_${matchId}`,
-        });
-      } catch (refundError) {
-        logger.error('Entry refund failed after create_match failure', {
-          matchId,
-          message: refundError?.message,
-        });
+      if (entryTxHash !== 'on-chain-escrow') {
+        try {
+          await escrowService.transferFromEscrow({
+            toPublicKey: creatorWalletPublic,
+            amountXlm: fee,
+            memo: `entry_refund_${matchId}`,
+          });
+        } catch (refundError) {
+          logger.error('Entry refund failed after create_match failure', {
+            matchId,
+            message: refundError?.message,
+          });
+        }
       }
       throw error;
     }
@@ -559,13 +561,15 @@ class BattleService {
     }
 
     const onChainMatchId = getOnChainMatchId(updated);
-    let entryTxHash = '';
+    let entryTxHash = 'on-chain-escrow';
     try {
-      entryTxHash = await escrowService.transferFromUserToEscrow({
-        user,
-        amountXlm: updated.entryFee,
-        memo: `battle_entry_${updated.matchId}_p2`,
-      });
+      if (process.env.ONCHAIN_ESCROW !== 'true') {
+        entryTxHash = await escrowService.transferFromUserToEscrow({
+          user,
+          amountXlm: updated.entryFee,
+          memo: `battle_entry_${updated.matchId}_p2`,
+        });
+      }
       const joinTxHash = await chainService.joinMatchOnChain({
         onChainMatchId,
         playerPublic: challengerWalletPublic,
@@ -581,7 +585,7 @@ class BattleService {
       };
       await updated.save();
     } catch (error) {
-      if (entryTxHash) {
+      if (entryTxHash && entryTxHash !== 'on-chain-escrow') {
         try {
           await escrowService.transferFromEscrow({
             toPublicKey: user.walletPublicKey,
@@ -960,11 +964,14 @@ class BattleService {
     const selectedPlayerPublic = selected === String(battle.player1) ? battle.player1Wallet : battle.player2Wallet;
     if (!isValidPublicKey(selectedPlayerPublic)) throw new Error('Missing selected player wallet for mirrored on-chain prediction');
 
-    const escrowTxHash = await escrowService.transferFromUserToEscrow({
-      user,
-      amountXlm: parsedAmount,
-      memo: `prediction_${matchId}`,
-    });
+    let escrowTxHash = 'on-chain-escrow';
+    if (process.env.ONCHAIN_ESCROW !== 'true') {
+      escrowTxHash = await escrowService.transferFromUserToEscrow({
+        user,
+        amountXlm: parsedAmount,
+        memo: `prediction_${matchId}`,
+      });
+    }
 
     let chainTxHash = '';
     try {
@@ -976,14 +983,16 @@ class BattleService {
         sourceSecret: escrowService.getUserSecret(user),
       });
     } catch (error) {
-      try {
-        await escrowService.transferFromEscrow({
-          toPublicKey: predictorPublic,
-          amountXlm: updated.entryFee,
-          memo: `prediction_refund_${matchId}`,
-        });
-      } catch (refundError) {
-        logger.error('Prediction refund failed', { matchId, message: refundError?.message });
+      if (escrowTxHash !== 'on-chain-escrow') {
+        try {
+          await escrowService.transferFromEscrow({
+            toPublicKey: predictorPublic,
+            amountXlm: parsedAmount,
+            memo: `prediction_refund_${matchId}`,
+          });
+        } catch (refundError) {
+          logger.error('Prediction refund failed', { matchId, message: refundError?.message });
+        }
       }
       throw error;
     }
@@ -1038,13 +1047,15 @@ class BattleService {
         prediction.payoutAmount = 0;
         const wallet = walletByUserId.get(String(prediction.predictor));
         if (wallet) {
-          prediction.payoutTxHash = await escrowService.transferFromEscrow({
-            toPublicKey: wallet,
-            amountXlm: prediction.amount,
-            memo: `pred_refund_${battle.matchId}`,
-          });
+          if (process.env.ONCHAIN_ESCROW !== 'true') {
+            prediction.payoutTxHash = await escrowService.transferFromEscrow({
+              toPublicKey: wallet,
+              amountXlm: prediction.amount,
+              memo: `pred_refund_${battle.matchId}`,
+            });
+            payoutHashes.push(prediction.payoutTxHash);
+          }
           prediction.payoutAmount = prediction.amount;
-          payoutHashes.push(prediction.payoutTxHash);
         }
         await prediction.save();
       }
@@ -1063,13 +1074,15 @@ class BattleService {
         prediction.payoutAmount = 0;
         const wallet = walletByUserId.get(String(prediction.predictor));
         if (wallet) {
-          prediction.payoutTxHash = await escrowService.transferFromEscrow({
-            toPublicKey: wallet,
-            amountXlm: prediction.amount,
-            memo: `pred_refund_${battle.matchId}`,
-          });
+          if (process.env.ONCHAIN_ESCROW !== 'true') {
+            prediction.payoutTxHash = await escrowService.transferFromEscrow({
+              toPublicKey: wallet,
+              amountXlm: prediction.amount,
+              memo: `pred_refund_${battle.matchId}`,
+            });
+            payoutHashes.push(prediction.payoutTxHash);
+          }
           prediction.payoutAmount = prediction.amount;
-          payoutHashes.push(prediction.payoutTxHash);
         }
         await prediction.save();
       }
@@ -1089,13 +1102,15 @@ class BattleService {
           payout = Number((totalPool - distributed).toFixed(7));
         }
         distributed = Number((distributed + payout).toFixed(7));
-        prediction.payoutTxHash = await escrowService.transferFromEscrow({
-          toPublicKey: wallet,
-          amountXlm: payout,
-          memo: `pred_win_${battle.matchId}`,
-        });
+        if (process.env.ONCHAIN_ESCROW !== 'true') {
+          prediction.payoutTxHash = await escrowService.transferFromEscrow({
+            toPublicKey: wallet,
+            amountXlm: payout,
+            memo: `pred_win_${battle.matchId}`,
+          });
+          payoutHashes.push(prediction.payoutTxHash);
+        }
         prediction.payoutAmount = payout;
-        payoutHashes.push(prediction.payoutTxHash);
       }
       await prediction.save();
     }
@@ -1112,25 +1127,39 @@ class BattleService {
   }
 
   async refundBattleEscrowOnCancel(battle) {
-    if (process.env.ONCHAIN_ESCROW === 'true') {
-      return ['on-chain-refund'];
-    }
     const refundTxHashes = [];
+    const onChain = process.env.ONCHAIN_ESCROW === 'true';
+
+    if (onChain && battle.chain?.onChainMatchId) {
+       try {
+           await chainService.cancelMatchOnChain({ onChainMatchId: battle.chain.onChainMatchId });
+       } catch (e) {
+           logger.error('Failed to cancel match on-chain', { matchId: battle.matchId, message: e.message });
+       }
+    }
 
     if (battle.finance?.entryTxPlayer1 && battle.player1Wallet) {
-      refundTxHashes.push(await escrowService.transferFromEscrow({
-        toPublicKey: battle.player1Wallet,
-        amountXlm: battle.entryFee,
-        memo: `cancel_refund_${battle.matchId}_p1`,
-      }));
+      if (onChain && battle.chain?.onChainMatchId) {
+         refundTxHashes.push(await chainService.refundExpiredOnChain({ onChainMatchId: battle.chain.onChainMatchId, playerPublic: battle.player1Wallet }));
+      } else {
+        refundTxHashes.push(await escrowService.transferFromEscrow({
+          toPublicKey: battle.player1Wallet,
+          amountXlm: battle.entryFee,
+          memo: `cancel_refund_${battle.matchId}_p1`,
+        }));
+      }
     }
 
     if (battle.finance?.entryTxPlayer2 && battle.player2Wallet) {
-      refundTxHashes.push(await escrowService.transferFromEscrow({
-        toPublicKey: battle.player2Wallet,
-        amountXlm: battle.entryFee,
-        memo: `cancel_refund_${battle.matchId}_p2`,
-      }));
+      if (onChain && battle.chain?.onChainMatchId) {
+         refundTxHashes.push(await chainService.refundExpiredOnChain({ onChainMatchId: battle.chain.onChainMatchId, playerPublic: battle.player2Wallet }));
+      } else {
+        refundTxHashes.push(await escrowService.transferFromEscrow({
+          toPublicKey: battle.player2Wallet,
+          amountXlm: battle.entryFee,
+          memo: `cancel_refund_${battle.matchId}_p2`,
+        }));
+      }
     }
 
     const pendingPredictions = await Prediction.find({
@@ -1194,15 +1223,60 @@ class BattleService {
     });
     battle.endedAt = new Date();
 
-    const onChainMatchId = getOnChainMatchId(battle);
+    let onChainMatchId;
+    try {
+        onChainMatchId = getOnChainMatchId(battle);
+    } catch (e) {
+        // If not mirrored, we can't finalize on chain
+        onChainMatchId = null;
+    }
+
+    if (vote1 === vote2 && battle.roast1 && battle.roast2 && onChainMatchId) {
+      logger.info('Match tied, invoking AI tiebreaker', { matchId });
+      const aiService = require('../../../utils/ai');
+      const tiebreakerWinner = await aiService.judgeTiebreaker(battle.topic, battle.roast1, battle.roast2);
+      
+      const aiVotedPlayer = tiebreakerWinner === 1 ? battle.player1 : battle.player2;
+      const aiVotedPlayerWallet = tiebreakerWinner === 1 ? battle.player1Wallet : battle.player2Wallet;
+      
+      try {
+        const aiVoteTxHash = await chainService.voteOnChain({
+          onChainMatchId,
+          selectedPlayerPublic: aiVotedPlayerWallet,
+          voterPublic: chainService.getEscrowPublic(),
+          sourceSecret: chainService.getEscrowSecret(),
+        });
+        
+        battle.chain = {
+          ...(battle.chain || {}),
+          voteTxHashes: [...((battle.chain || {}).voteTxHashes || []), aiVoteTxHash],
+        };
+        
+        if (tiebreakerWinner === 1) {
+            vote1 += 1;
+            battle.votesPlayer1 = vote1;
+        } else {
+            vote2 += 1;
+            battle.votesPlayer2 = vote2;
+        }
+        logger.info('AI tiebreaker decided', { matchId, winner: tiebreakerWinner });
+      } catch (e) {
+          logger.warn('AI Judge on-chain vote failed (perhaps not registered as a User), falling back to draw', { matchId, message: e.message });
+      }
+    }
+
     if (vote1 === vote2) {
       battle.status = 'draw';
       battle.winner = null;
-      battle.txHash = await chainService.refundDrawOnChain({ onChainMatchId });
+      if (onChainMatchId) {
+          battle.txHash = await chainService.finalizeMatchOnChain({ onChainMatchId });
+      }
     } else {
       battle.status = 'ended';
       battle.winner = vote1 > vote2 ? battle.player1 : battle.player2;
-      battle.txHash = await chainService.finalizeMatchOnChain({ onChainMatchId });
+      if (onChainMatchId) {
+          battle.txHash = await chainService.finalizeMatchOnChain({ onChainMatchId });
+      }
     }
     battle.chain = {
       ...(battle.chain || {}),
@@ -1212,31 +1286,43 @@ class BattleService {
     const payoutTxHashes = [];
     if (battle.status === 'draw') {
       if (battle.finance?.entryTxPlayer1 && battle.player1Wallet) {
-        payoutTxHashes.push(await escrowService.transferFromEscrow({
-          toPublicKey: battle.player1Wallet,
-          amountXlm: battle.entryFee,
-          memo: `draw_refund_${matchId}_p1`,
-        }));
+        if (process.env.ONCHAIN_ESCROW === 'true' && onChainMatchId) {
+            payoutTxHashes.push(await chainService.refundDrawOnChain({ onChainMatchId, playerPublic: battle.player1Wallet }));
+        } else {
+            payoutTxHashes.push(await escrowService.transferFromEscrow({
+              toPublicKey: battle.player1Wallet,
+              amountXlm: battle.entryFee,
+              memo: `draw_refund_${matchId}_p1`,
+            }));
+        }
       }
       if (battle.finance?.entryTxPlayer2 && battle.player2Wallet) {
-        payoutTxHashes.push(await escrowService.transferFromEscrow({
-          toPublicKey: battle.player2Wallet,
-          amountXlm: battle.entryFee,
-          memo: `draw_refund_${matchId}_p2`,
-        }));
+        if (process.env.ONCHAIN_ESCROW === 'true' && onChainMatchId) {
+            payoutTxHashes.push(await chainService.refundDrawOnChain({ onChainMatchId, playerPublic: battle.player2Wallet }));
+        } else {
+            payoutTxHashes.push(await escrowService.transferFromEscrow({
+              toPublicKey: battle.player2Wallet,
+              amountXlm: battle.entryFee,
+              memo: `draw_refund_${matchId}_p2`,
+            }));
+        }
       }
     } else if (battle.winner) {
-      const winnerUser = await User.findById(battle.winner).select('walletPublicKey');
-      const winnerWallet = winnerUser?.walletPublicKey;
-      const entryPot =
-        (battle.finance?.entryTxPlayer1 ? battle.entryFee : 0) +
-        (battle.finance?.entryTxPlayer2 ? battle.entryFee : 0);
-      if (winnerWallet && entryPot > 0) {
-        payoutTxHashes.push(await escrowService.transferFromEscrow({
-          toPublicKey: winnerWallet,
-          amountXlm: entryPot,
-          memo: `battle_win_${matchId}`,
-        }));
+      if (process.env.ONCHAIN_ESCROW !== 'true') {
+        const winnerUser = await User.findById(battle.winner).select('walletPublicKey');
+        const winnerWallet = winnerUser?.walletPublicKey;
+        const entryPot =
+          (battle.finance?.entryTxPlayer1 ? battle.entryFee : 0) +
+          (battle.finance?.entryTxPlayer2 ? battle.entryFee : 0);
+        if (winnerWallet && entryPot > 0) {
+          payoutTxHashes.push(await escrowService.transferFromEscrow({
+            toPublicKey: winnerWallet,
+            amountXlm: entryPot,
+            memo: `battle_win_${matchId}`,
+          }));
+        }
+      } else {
+         // Contract handles winner payout automatically in finalize_match!
       }
     }
 

@@ -286,11 +286,38 @@ class BattleChainService {
     return result.txHash;
   }
 
-  async refundDrawOnChain({ onChainMatchId }) {
+  async refundDrawOnChain({ onChainMatchId, playerPublic }) {
     const sourceSecret = this.getEscrowSecret();
     const result = await this.invokeContract({
-      method: process.env.STELLAR_REFUND_DRAW_FN || 'finalize_match',
+      method: process.env.STELLAR_REFUND_DRAW_FN || 'refund_draw',
+      args: [
+        StellarSdk.nativeToScVal(Number(onChainMatchId), { type: 'u32' }),
+        StellarSdk.nativeToScVal(playerPublic, { type: 'address' }),
+      ],
+      sourceSecret,
+      sourcePublic: this.getEscrowPublic(),
+    });
+    return result.txHash;
+  }
+  async cancelMatchOnChain({ onChainMatchId }) {
+    const sourceSecret = this.getEscrowSecret();
+    const result = await this.invokeContract({
+      method: 'cancel_match',
       args: [StellarSdk.nativeToScVal(Number(onChainMatchId), { type: 'u32' })],
+      sourceSecret,
+      sourcePublic: this.getEscrowPublic(),
+    });
+    return result.txHash;
+  }
+
+  async refundExpiredOnChain({ onChainMatchId, playerPublic }) {
+    const sourceSecret = this.getEscrowSecret();
+    const result = await this.invokeContract({
+      method: 'refund_expired',
+      args: [
+        StellarSdk.nativeToScVal(Number(onChainMatchId), { type: 'u32' }),
+        StellarSdk.nativeToScVal(playerPublic, { type: 'address' }),
+      ],
       sourceSecret,
       sourcePublic: this.getEscrowPublic(),
     });
