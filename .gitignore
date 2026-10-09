@@ -26,15 +26,15 @@ Thumbs.db
 # Config
 .env
 .env.local
-.env.example
+.env.*.local
 *.local.toml
+!.env.example
 
 # Stellar CLI
 .config/
 identity/
 # Un-ignore contracts lock file
 .vercel
-.env*
 
 Frontend/patch_ui.js
 WEEK1_PLAN.md
